@@ -14,5 +14,5 @@
 
 ## 3. Example App Integration and Manual Verification
 
-- [x] 3.1 Update `example/lib/main.dart` with a UI control to select PDF printing strategy (`unifiedRoll` vs `pageByPage`) and print sample ticket PDF (`ticket ejemplo.pdf`).
+- [x] 3.1 Update `example/lib/main.dart` with a UI control to select PDF printing strategy (`unifiedRoll` vs `pageByPage`) and print sample ticket PDF (`sample.pdf`).
 - [x] 3.2 Verify code quality and static analysis with `dart analyze`.

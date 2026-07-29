@@ -1,6 +1,6 @@
 ## Context
 
-The `printer_flutter` plugin connects via Bluetooth Classic SPP to thermal printers using TSPL/TSPL2 commands. To support printing PDF documents like traffic citations (`ticket ejemplo.pdf`) onto continuous thermal paper (e.g. 72mm width), the plugin needs a native Android PDF renderer and TSPL byte builder capable of handling continuous roll dimensions.
+The `printer_flutter` plugin connects via Bluetooth Classic SPP to thermal printers using TSPL/TSPL2 commands. To support printing PDF documents like traffic citations (`sample.pdf`) onto continuous thermal paper (e.g. 72mm width), the plugin needs a native Android PDF renderer and TSPL byte builder capable of handling continuous roll dimensions.
 
 ## Goals / Non-Goals
 
