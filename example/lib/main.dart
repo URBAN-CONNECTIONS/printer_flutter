@@ -25,7 +25,7 @@ class _MyAppState extends State<MyApp> {
       TextEditingController(text: 'DC:0D:30:FD:B5:B9');
   final List<String> _logs = [];
   bool _isLoading = false;
-  PdfPrintStrategy _strategy = PdfPrintStrategy.pageByPage;
+  final PdfPrintStrategy _strategy = PdfPrintStrategy.pageByPage;
 
   @override
   void initState() {

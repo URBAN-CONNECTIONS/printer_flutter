@@ -1,0 +1,20 @@
+# Documentation and test files
+docs/
+*.pdf
+ticket ejemplo.pdf
+
+# Build directories and generated assets
+build/
+example/build/
+
+# Agent and tool configurations
+.agent/
+.agents/
+.dart_skills/
+skills-lock.json
+openspec/
+
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store
