@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'printer_flutter_method_channel.dart';
@@ -25,5 +26,21 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
 
   Future<String?> getPlatformVersion() {
     throw UnimplementedError('platformVersion() has not been implemented.');
+  }
+
+  Future<String?> openPort(String macAddress) {
+    throw UnimplementedError('openPort() has not been implemented.');
+  }
+
+  Future<String?> sendTspl(String command) {
+    throw UnimplementedError('sendTspl() has not been implemented.');
+  }
+
+  Future<String?> sendRawBytes(Uint8List bytes) {
+    throw UnimplementedError('sendRawBytes() has not been implemented.');
+  }
+
+  Future<String?> closePort() {
+    throw UnimplementedError('closePort() has not been implemented.');
   }
 }
