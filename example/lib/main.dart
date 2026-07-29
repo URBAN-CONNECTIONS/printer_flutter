@@ -53,6 +53,20 @@ class _MyAppState extends State<MyApp> {
     });
   }
 
+  Future<void> _requestPermissions() async {
+    setState(() => _isLoading = true);
+    _addLog('Requesting permissions...');
+
+    try {
+      final res = await _printerFlutterPlugin.requestPermissions();
+      _addLog('Permissions Granted: $res');
+    } catch (e) {
+      _addLog('Permissions Error: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   Future<void> _connect() async {
     final mac = _macController.text.trim();
     if (mac.isEmpty) {
@@ -147,6 +161,16 @@ PRINT 1,1
               else
                 const SizedBox(height: 4),
               const SizedBox(height: 12),
+              ElevatedButton.icon(
+                onPressed: _isLoading ? null : _requestPermissions,
+                icon: const Icon(Icons.security),
+                label: const Text('Request Bluetooth Permissions'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.all(12),
+                  backgroundColor: Colors.orange.shade100,
+                ),
+              ),
+              const SizedBox(height: 8),
               ElevatedButton.icon(
                 onPressed: _isLoading ? null : _connect,
                 icon: const Icon(Icons.bluetooth_connected),

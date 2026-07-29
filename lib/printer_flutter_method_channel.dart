@@ -17,6 +17,12 @@ class MethodChannelPrinterFlutter extends PrinterFlutterPlatform {
   }
 
   @override
+  Future<bool> requestPermissions() async {
+    final result = await methodChannel.invokeMethod<bool>('requestPermissions');
+    return result ?? false;
+  }
+
+  @override
   Future<String?> openPort(String macAddress) async {
     final status = await methodChannel
         .invokeMethod<String>('openPort', {'macAddress': macAddress});

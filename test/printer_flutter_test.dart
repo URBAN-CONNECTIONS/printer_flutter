@@ -12,6 +12,9 @@ class MockPrinterFlutterPlatform
   Future<String?> getPlatformVersion() => Future.value('42');
 
   @override
+  Future<bool> requestPermissions() => Future.value(true);
+
+  @override
   Future<String?> openPort(String macAddress) => Future.value('Success');
 
   @override

@@ -7,6 +7,11 @@ class PrinterFlutter {
     return PrinterFlutterPlatform.instance.getPlatformVersion();
   }
 
+  /// Requests Bluetooth and location permissions on Android.
+  Future<bool> requestPermissions() {
+    return PrinterFlutterPlatform.instance.requestPermissions();
+  }
+
   Future<String?> openPort(String macAddress) {
     return PrinterFlutterPlatform.instance.openPort(macAddress);
   }

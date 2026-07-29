@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'printer_flutter_method_channel.dart';
@@ -28,18 +29,27 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
     throw UnimplementedError('platformVersion() has not been implemented.');
   }
 
+  /// Requests Bluetooth and location permissions on Android.
+  Future<bool> requestPermissions() {
+    throw UnimplementedError('requestPermissions() has not been implemented.');
+  }
+
+  /// Opens a Bluetooth connection to the printer using its MAC address.
   Future<String?> openPort(String macAddress) {
     throw UnimplementedError('openPort() has not been implemented.');
   }
 
+  /// Sends a TSPL command string to the connected printer.
   Future<String?> sendTspl(String command) {
     throw UnimplementedError('sendTspl() has not been implemented.');
   }
 
+  /// Sends raw bytes to the connected printer.
   Future<String?> sendRawBytes(Uint8List bytes) {
     throw UnimplementedError('sendRawBytes() has not been implemented.');
   }
 
+  /// Closes the active Bluetooth connection.
   Future<String?> closePort() {
     throw UnimplementedError('closePort() has not been implemented.');
   }
