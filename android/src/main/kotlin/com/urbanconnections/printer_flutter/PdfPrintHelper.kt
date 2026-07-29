@@ -25,6 +25,7 @@ object PdfPrintHelper {
         val dpi = (options["dpi"] as? Int) ?: 203
         val strategy = (options["strategy"] as? String) ?: "unifiedRoll"
         val enableDithering = (options["enableDithering"] as? Boolean) ?: true
+        val trimWhitespace = (options["trimWhitespace"] as? Boolean) ?: false
 
         // Calculate dots per mm
         val dotsPerMm = dpi / 25.4
@@ -41,9 +42,9 @@ object PdfPrintHelper {
             if (pageCount == 0) return
 
             if (strategy == "unifiedRoll") {
-                printUnifiedRoll(pdfRenderer, alignedWidth, widthBytes, enableDithering, sendCommand, sendString, paperWidthMm)
+                printUnifiedRoll(pdfRenderer, alignedWidth, widthBytes, enableDithering, trimWhitespace, sendCommand, sendString, paperWidthMm)
             } else {
-                printPageByPage(pdfRenderer, alignedWidth, widthBytes, enableDithering, sendCommand, sendString, paperWidthMm)
+                printPageByPage(pdfRenderer, alignedWidth, widthBytes, enableDithering, trimWhitespace, sendCommand, sendString, paperWidthMm)
             }
         } finally {
             pdfRenderer.close()
@@ -56,6 +57,7 @@ object PdfPrintHelper {
         alignedWidth: Int,
         widthBytes: Int,
         enableDithering: Boolean,
+        trimWhitespace: Boolean,
         sendCommand: (ByteArray) -> Unit,
         sendString: (String) -> Unit,
         paperWidthMm: Double
@@ -76,8 +78,21 @@ object PdfPrintHelper {
             page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
             page.close()
 
-            bitmaps.add(bitmap)
-            totalHeight += height
+            var finalHeight = height
+            if (trimWhitespace) {
+                finalHeight = getCroppedHeight(bitmap)
+            }
+
+            val pageBitmap = if (finalHeight != height) {
+                val cropped = Bitmap.createBitmap(bitmap, 0, 0, alignedWidth, finalHeight)
+                bitmap.recycle()
+                cropped
+            } else {
+                bitmap
+            }
+
+            bitmaps.add(pageBitmap)
+            totalHeight += finalHeight
         }
 
         // Stitch into one large bitmap
@@ -114,6 +129,7 @@ object PdfPrintHelper {
         alignedWidth: Int,
         widthBytes: Int,
         enableDithering: Boolean,
+        trimWhitespace: Boolean,
         sendCommand: (ByteArray) -> Unit,
         sendString: (String) -> Unit,
         paperWidthMm: Double
@@ -131,21 +147,34 @@ object PdfPrintHelper {
             page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
             page.close()
 
-            val heightMm = (height / (203 / 25.4)).roundToInt()
+            var finalHeight = height
+            if (trimWhitespace) {
+                finalHeight = getCroppedHeight(bitmap)
+            }
+
+            val pageBitmap = if (finalHeight != height) {
+                val cropped = Bitmap.createBitmap(bitmap, 0, 0, alignedWidth, finalHeight)
+                bitmap.recycle()
+                cropped
+            } else {
+                bitmap
+            }
+
+            val heightMm = (finalHeight / (203 / 25.4)).roundToInt()
             
             sendString("SIZE $paperWidthMm mm, $heightMm mm\r\n")
             sendString("GAP 0,0\r\n")
             sendString("DIRECTION 0\r\n")
             sendString("CLS\r\n")
 
-            val monoBytes = convertToMonochrome(bitmap, widthBytes, enableDithering)
-            val header = "BITMAP 0,0,$widthBytes,$height,0,".toByteArray(Charsets.US_ASCII)
+            val monoBytes = convertToMonochrome(pageBitmap, widthBytes, enableDithering)
+            val header = "BITMAP 0,0,$widthBytes,$finalHeight,0,".toByteArray(Charsets.US_ASCII)
             
             sendCommand(header)
             sendCommand(monoBytes)
             sendString("\r\nPRINT 1,1\r\n")
 
-            bitmap.recycle()
+            pageBitmap.recycle()
         }
     }
 
@@ -218,5 +247,22 @@ object PdfPrintHelper {
         }
 
         return outBytes
+    }
+
+    private fun getCroppedHeight(bitmap: Bitmap): Int {
+        val width = bitmap.width
+        val height = bitmap.height
+        val pixels = IntArray(width * height)
+        bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+
+        for (y in height - 1 downTo 0) {
+            for (x in 0 until width) {
+                if (pixels[y * width + x] != Color.WHITE) {
+                    // Add a small 20 pixel padding so it's not flush with the last printed pixel
+                    return kotlin.math.min(height, y + 1 + 20)
+                }
+            }
+        }
+        return height
     }
 }

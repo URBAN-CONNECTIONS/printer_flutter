@@ -27,11 +27,15 @@ class PdfPrintOptions {
   /// Whether to apply dithering (e.g., Floyd-Steinberg) to preserve photographs/gradients in 1-bit monochrome.
   final bool enableDithering;
 
+  /// Whether to trim empty white space from the bottom of the rendered PDF pages.
+  final bool trimWhitespace;
+
   const PdfPrintOptions({
     this.paperWidthMm = 72.0,
     this.dpi = 203,
     this.strategy = PdfPrintStrategy.pageByPage,
     this.enableDithering = true,
+    this.trimWhitespace = false,
   });
 
   Map<String, dynamic> toMap() {
@@ -40,6 +44,7 @@ class PdfPrintOptions {
       'dpi': dpi,
       'strategy': strategy.name,
       'enableDithering': enableDithering,
+      'trimWhitespace': trimWhitespace,
     };
   }
 }
