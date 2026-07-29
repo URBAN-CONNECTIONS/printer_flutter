@@ -19,17 +19,26 @@ class _MyAppState extends State<MyApp> {
   String _platformVersion = 'Unknown';
   final _printerFlutterPlugin = PrinterFlutter();
 
+  final TextEditingController _macController =
+      TextEditingController(text: 'DC:0D:30:FD:B5:B9');
+  final List<String> _logs = [];
+  bool _isLoading = false;
+
   @override
   void initState() {
     super.initState();
     initPlatformState();
   }
 
-  // Platform messages are asynchronous, so we initialize in an async method.
+  void _addLog(String log) {
+    setState(() {
+      _logs.insert(
+          0, '[${DateTime.now().toIso8601String().substring(11, 19)}] $log');
+    });
+  }
+
   Future<void> initPlatformState() async {
     String platformVersion;
-    // Platform messages may fail, so we use a try/catch PlatformException.
-    // We also handle the message potentially returning null.
     try {
       platformVersion = await _printerFlutterPlugin.getPlatformVersion() ??
           'Unknown platform version';
@@ -37,9 +46,6 @@ class _MyAppState extends State<MyApp> {
       platformVersion = 'Failed to get platform version.';
     }
 
-    // If the widget was removed from the tree while the asynchronous platform
-    // message was in flight, we want to discard the reply rather than calling
-    // setState to update our non-existent appearance.
     if (!mounted) return;
 
     setState(() {
@@ -47,15 +53,158 @@ class _MyAppState extends State<MyApp> {
     });
   }
 
+  Future<void> _connect() async {
+    final mac = _macController.text.trim();
+    if (mac.isEmpty) {
+      _addLog('Error: MAC address is empty');
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    _addLog('Connecting to $mac...');
+
+    try {
+      final res = await _printerFlutterPlugin.openPort(mac);
+      _addLog('Connect Result: $res');
+    } catch (e) {
+      _addLog('Connect Error: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _printTestLabel() async {
+    setState(() => _isLoading = true);
+    _addLog('Sending TSPL print command...');
+
+    const String tsplCommand = '''
+SIZE 40 mm, 30 mm
+GAP 2 mm, 0 mm
+CLS
+TEXT 50,30,"3",0,1,1,"TSC FLUTTER TEST"
+TEXT 50,70,"2",0,1,1,"MAC: DC:0D:30:FD:B5:B9"
+BARCODE 50,110,"128",60,1,0,2,2,"123456789"
+PRINT 1,1
+''';
+
+    try {
+      final res = await _printerFlutterPlugin.sendTspl(tsplCommand);
+      _addLog('Print Result: $res');
+    } catch (e) {
+      _addLog('Print Error: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _closePort() async {
+    setState(() => _isLoading = true);
+    _addLog('Closing port...');
+
+    try {
+      final res = await _printerFlutterPlugin.closePort();
+      _addLog('Close Result: $res');
+    } catch (e) {
+      _addLog('Close Error: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      theme: ThemeData(
+        useMaterial3: true,
+        colorSchemeSeed: Colors.blue,
+      ),
       home: Scaffold(
         appBar: AppBar(
-          title: const Text('Plugin example app'),
+          title: const Text('TSC Printer Test'),
+          centerTitle: true,
         ),
-        body: Center(
-          child: Text('Running on: $_platformVersion\n'),
+        body: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Running on: $_platformVersion',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _macController,
+                decoration: const InputDecoration(
+                  labelText: 'Printer MAC Address',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.bluetooth),
+                ),
+              ),
+              const SizedBox(height: 16),
+              if (_isLoading)
+                const LinearProgressIndicator()
+              else
+                const SizedBox(height: 4),
+              const SizedBox(height: 12),
+              ElevatedButton.icon(
+                onPressed: _isLoading ? null : _connect,
+                icon: const Icon(Icons.bluetooth_connected),
+                label: const Text('Connect to Printer'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.all(12),
+                ),
+              ),
+              const SizedBox(height: 8),
+              ElevatedButton.icon(
+                onPressed: _isLoading ? null : _printTestLabel,
+                icon: const Icon(Icons.print),
+                label: const Text('Print Test Label (TSPL)'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green.shade100,
+                  padding: const EdgeInsets.all(12),
+                ),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _isLoading ? null : _closePort,
+                icon: const Icon(Icons.power_settings_new),
+                label: const Text('Disconnect Printer'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.red,
+                  padding: const EdgeInsets.all(12),
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'Activity Logs:',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.black87,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: ListView.builder(
+                    itemCount: _logs.length,
+                    itemBuilder: (context, index) {
+                      return Text(
+                        _logs[index],
+                        style: const TextStyle(
+                          color: Colors.greenAccent,
+                          fontFamily: 'monospace',
+                          fontSize: 12,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
