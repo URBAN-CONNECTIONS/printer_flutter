@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'printer_flutter_platform_interface.dart';
+import 'printer_flutter.dart';
 
 /// An implementation of [PrinterFlutterPlatform] that uses method channels.
 class MethodChannelPrinterFlutter extends PrinterFlutterPlatform {
@@ -46,6 +47,15 @@ class MethodChannelPrinterFlutter extends PrinterFlutterPlatform {
   @override
   Future<String?> closePort() async {
     final status = await methodChannel.invokeMethod<String>('closePort');
+    return status;
+  }
+
+  @override
+  Future<String?> printPdf(String filePath, PdfPrintOptions options) async {
+    final status = await methodChannel.invokeMethod<String>('printPdf', {
+      'filePath': filePath,
+      'options': options.toMap(),
+    });
     return status;
   }
 }

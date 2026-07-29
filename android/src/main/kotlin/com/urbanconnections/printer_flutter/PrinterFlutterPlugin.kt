@@ -78,6 +78,19 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
           tsc.closeport()
         }
       }
+      "printPdf" -> {
+        val filePath = call.argument<String>("filePath") ?: ""
+        val options = call.argument<Map<String, Any>>("options") ?: emptyMap()
+        executeInBackground(result) {
+          PdfPrintHelper.printPdf(
+            filePath = filePath,
+            options = options,
+            sendCommand = { bytes -> tsc.sendcommand(bytes) },
+            sendString = { str -> tsc.sendcommand(str) }
+          )
+          "Success"
+        }
+      }
       else -> {
         result.notImplemented()
       }

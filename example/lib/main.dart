@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 
 import 'package:flutter/services.dart';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 import 'package:printer_flutter/printer_flutter.dart';
 
 void main() {
@@ -23,6 +25,7 @@ class _MyAppState extends State<MyApp> {
       TextEditingController(text: 'DC:0D:30:FD:B5:B9');
   final List<String> _logs = [];
   bool _isLoading = false;
+  PdfPrintStrategy _strategy = PdfPrintStrategy.unifiedRoll;
 
   @override
   void initState() {
@@ -125,6 +128,35 @@ PRINT 1,1
     }
   }
 
+  Future<void> _printPdfLabel() async {
+    setState(() => _isLoading = true);
+    _addLog('Preparing PDF from assets...');
+
+    try {
+      final bytes = await rootBundle.load('assets/ticket_ejemplo.pdf');
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/ticket_ejemplo.pdf');
+      await file.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
+
+      _addLog('Sending PDF Print Command (${_strategy.name})...');
+      
+      final res = await _printerFlutterPlugin.printPdf(
+        filePath: file.path,
+        options: PdfPrintOptions(
+          paperWidthMm: 72.0,
+          dpi: 203,
+          strategy: _strategy,
+          enableDithering: true,
+        ),
+      );
+      _addLog('PDF Print Result: $res');
+    } catch (e) {
+      _addLog('PDF Print Error: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -190,6 +222,34 @@ PRINT 1,1
                 ),
               ),
               const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Text('Strategy: '),
+                  const SizedBox(width: 8),
+                  DropdownButton<PdfPrintStrategy>(
+                    value: _strategy,
+                    items: PdfPrintStrategy.values.map((s) {
+                      return DropdownMenuItem(
+                        value: s,
+                        child: Text(s.name),
+                      );
+                    }).toList(),
+                    onChanged: (val) {
+                      if (val != null) setState(() => _strategy = val);
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              ElevatedButton.icon(
+                onPressed: _isLoading ? null : _printPdfLabel,
+                icon: const Icon(Icons.picture_as_pdf),
+                label: const Text('Print Sample PDF Ticket'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.purple.shade100,
+                  padding: const EdgeInsets.all(12),
+                ),
+              ),
               OutlinedButton.icon(
                 onPressed: _isLoading ? null : _closePort,
                 icon: const Icon(Icons.power_settings_new),
