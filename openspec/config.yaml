@@ -1,0 +1,31 @@
+schema: spec-driven
+
+context: |
+  Domain: Flutter Bluetooth Thermal Printer Plugin / SDK (TSPL Focus).
+  Users: Flutter mobile developers integrating thermal label/receipt printing.
+  Core Features:
+  - Direct MAC Address Connection: Connect directly via printer MAC address (`connect(macAddress)`) using Android Bluetooth Classic SPP socket connections.
+  - TSPL Command Set & Builder: Mandatory `LabelConfig(widthMm, heightMm, gapMm)` initialization (`SIZE`, `GAP`, `CLS`) for TSPL/TSPL2 commands (formatted text, 1D barcodes, 2D QR codes, raster images, print execution `PRINT 1`).
+  - PDF Thermal Printing: Render PDF pages into monochrome bitmaps scaled to fit standard thermal paper widths (e.g., 58mm, 80mm, or label size) and transmit via TSPL bitmap commands.
+  - Combo API Design: High-level unified command builder + raw byte array escape hatch (`sendRawBytes`).
+  - Extensible Architecture: Designed with protocol abstractions so additional printer protocols (ESC/POS, CPCL) can be added in the future.
+
+  Architecture: Flutter Plugin with Dart interface and Android Native (Kotlin/Java) Bluetooth SPP implementation.
+  Target Platform: Android only (minSdkVersion 21+ with Android 12+ Bluetooth permissions `BLUETOOTH_CONNECT`).
+  Hardware Integration: Thermal label & receipt printers via Bluetooth Classic SPP.
+  Tech Stack: Flutter, Dart, Android Kotlin/Java, Android PdfRenderer & Graphics APIs.
+  We use conventional commits.
+
+rules:
+  proposal:
+    - Keep proposals under 500 words
+    - Always include a "Non-goals" section
+  tasks:
+    - Break tasks into chunks of max 2 hours
+    - Keep tasks focused and modular
+    - Add tests
+    - All generated code MUST be formatted according to the project's VS Code linter/formatter rules (e.g. `dart format` compliance) to prevent large formatting diffs in a multi-developer environment.
+  specs:
+    - Use Given/When/Then format for scenarios
+  design:
+    - Include sequence diagrams for complex flows
