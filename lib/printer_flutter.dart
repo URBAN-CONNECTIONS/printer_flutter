@@ -30,7 +30,7 @@ class PdfPrintOptions {
   const PdfPrintOptions({
     this.paperWidthMm = 72.0,
     this.dpi = 203,
-    this.strategy = PdfPrintStrategy.unifiedRoll,
+    this.strategy = PdfPrintStrategy.pageByPage,
     this.enableDithering = true,
   });
 

@@ -212,11 +212,10 @@ object PdfPrintHelper {
             }
         }
         
-        // Inverse colors depending on TSPL interpretation.
-        // In standard TSPL, 1 means black dot, 0 means white paper.
-        // Wait, standard TSPL mode 0 (OVERWRITE) assumes 0 bit is white, 1 bit is black.
-        // Sometimes it is inverted: 0xFF is black line, 0x00 is white line.
-        // The implementation above sets 1 for black dots, which results in 0xFF for a black line. This is standard for TSPL.
+        // Invert all bits: for this thermal printer, 0 means black (print) and 1 means white (background)
+        for (i in outBytes.indices) {
+            outBytes[i] = outBytes[i].toInt().inv().toByte()
+        }
 
         return outBytes
     }

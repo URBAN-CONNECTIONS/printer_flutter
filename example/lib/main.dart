@@ -25,7 +25,7 @@ class _MyAppState extends State<MyApp> {
       TextEditingController(text: 'DC:0D:30:FD:B5:B9');
   final List<String> _logs = [];
   bool _isLoading = false;
-  PdfPrintStrategy _strategy = PdfPrintStrategy.unifiedRoll;
+  PdfPrintStrategy _strategy = PdfPrintStrategy.pageByPage;
 
   @override
   void initState() {
@@ -139,7 +139,7 @@ PRINT 1,1
       await file.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
 
       _addLog('Sending PDF Print Command (${_strategy.name})...');
-      
+
       final res = await _printerFlutterPlugin.printPdf(
         filePath: file.path,
         options: PdfPrintOptions(
@@ -220,25 +220,6 @@ PRINT 1,1
                   backgroundColor: Colors.green.shade100,
                   padding: const EdgeInsets.all(12),
                 ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  const Text('Strategy: '),
-                  const SizedBox(width: 8),
-                  DropdownButton<PdfPrintStrategy>(
-                    value: _strategy,
-                    items: PdfPrintStrategy.values.map((s) {
-                      return DropdownMenuItem(
-                        value: s,
-                        child: Text(s.name),
-                      );
-                    }).toList(),
-                    onChanged: (val) {
-                      if (val != null) setState(() => _strategy = val);
-                    },
-                  ),
-                ],
               ),
               const SizedBox(height: 8),
               ElevatedButton.icon(
