@@ -1,3 +1,9 @@
+## 0.0.3
+
+* Added `ensureBluetoothIsOn()` to natively check and prompt the user to enable Bluetooth on Android.
+* Added native iOS support for checking `CBCentralManager` power state in `ensureBluetoothIsOn()`.
+* Removes the need for external Bluetooth LE packages just to manage adapter state.
+
 ## 0.0.2
 
 * Added optional `copies` argument to `printPdf` and other print methods.
