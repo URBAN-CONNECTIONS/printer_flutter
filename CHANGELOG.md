@@ -1,3 +1,8 @@
+## 0.0.2
+
+* Added optional `copies` argument to `printPdf` and other print methods.
+* Optimized `pageByPage` printing strategy to cache TSPL commands in memory for faster collation when `copies > 1`.
+
 ## 0.0.1
 
 * Initial release of `printer_flutter`.
