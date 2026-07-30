@@ -26,4 +26,18 @@ void main() {
   test('getPlatformVersion', () async {
     expect(await platform.getPlatformVersion(), '42');
   });
+
+  test('printPdf passes copies argument', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+      if (methodCall.method == 'printPdf') {
+        final copies = methodCall.arguments['copies'];
+        return 'copies=$copies';
+      }
+      return null;
+    });
+
+    final result = await platform.printPdf('path/to/file.pdf', const PdfPrintOptions(), copies: 3);
+    expect(result, 'copies=3');
+  });
 }

@@ -51,10 +51,11 @@ class MethodChannelPrinterFlutter extends PrinterFlutterPlatform {
   }
 
   @override
-  Future<String?> printPdf(String filePath, PdfPrintOptions options) async {
+  Future<String?> printPdf(String filePath, PdfPrintOptions options, {int copies = 1}) async {
     final status = await methodChannel.invokeMethod<String>('printPdf', {
       'filePath': filePath,
       'options': options.toMap(),
+      'copies': copies,
     });
     return status;
   }

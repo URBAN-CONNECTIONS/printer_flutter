@@ -79,7 +79,8 @@ class PrinterFlutter {
   Future<String?> printPdf({
     required String filePath,
     PdfPrintOptions options = const PdfPrintOptions(),
+    int copies = 1,
   }) {
-    return PrinterFlutterPlatform.instance.printPdf(filePath, options);
+    return PrinterFlutterPlatform.instance.printPdf(filePath, options, copies: copies);
   }
 }

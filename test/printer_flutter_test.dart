@@ -27,7 +27,7 @@ class MockPrinterFlutterPlatform
   Future<String?> closePort() => Future.value('Success');
 
   @override
-  Future<String?> printPdf(String filePath, PdfPrintOptions options) => Future.value('Success');
+  Future<String?> printPdf(String filePath, PdfPrintOptions options, {int copies = 1}) => Future.value('Success');
 }
 
 void main() {
