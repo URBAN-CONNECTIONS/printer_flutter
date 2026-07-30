@@ -54,6 +54,11 @@ class PrinterFlutter {
     return PrinterFlutterPlatform.instance.getPlatformVersion();
   }
 
+  /// Checks if Bluetooth is enabled and natively prompts to enable it on Android.
+  Future<bool> ensureBluetoothIsOn() {
+    return PrinterFlutterPlatform.instance.ensureBluetoothIsOn();
+  }
+
   /// Requests Bluetooth and location permissions on Android.
   Future<bool> requestPermissions() {
     return PrinterFlutterPlatform.instance.requestPermissions();

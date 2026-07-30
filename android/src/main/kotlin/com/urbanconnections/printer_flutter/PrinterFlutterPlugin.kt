@@ -2,6 +2,8 @@ package com.urbanconnections.printer_flutter
 
 import android.Manifest
 import android.app.Activity
+import android.bluetooth.BluetoothAdapter
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
@@ -25,13 +27,16 @@ import io.flutter.plugin.common.PluginRegistry
 import java.util.concurrent.Executors
 
 /** PrinterFlutterPlugin */
-class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, PluginRegistry.RequestPermissionsResultListener {
+class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, PluginRegistry.RequestPermissionsResultListener, PluginRegistry.ActivityResultListener {
   private lateinit var channel : MethodChannel
   private val tsc = TSCActivity()
   
   private var activity: Activity? = null
   private var permissionResultCallback: Result? = null
   private val PERMISSION_REQUEST_CODE = 1001
+
+  private var bluetoothEnableResultCallback: Result? = null
+  private val BLUETOOTH_ENABLE_REQUEST_CODE = 1002
 
   // Single thread executor to run printer commands off the main thread
   private val executor = Executors.newSingleThreadExecutor()
@@ -46,6 +51,9 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
     when (call.method) {
       "getPlatformVersion" -> {
         result.success("Android ${android.os.Build.VERSION.RELEASE}")
+      }
+      "ensureBluetoothIsOn" -> {
+        handleEnsureBluetoothIsOn(result)
       }
       "requestPermissions" -> {
         handleRequestPermissions(result)
@@ -139,6 +147,43 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
     return false
   }
 
+  private fun handleEnsureBluetoothIsOn(result: Result) {
+    val currentActivity = activity
+    if (currentActivity == null) {
+      result.error("NO_ACTIVITY", "Plugin is not attached to an activity.", null)
+      return
+    }
+
+    val adapter = BluetoothAdapter.getDefaultAdapter()
+    if (adapter == null) {
+      result.success(false)
+      return
+    }
+
+    if (adapter.isEnabled) {
+      result.success(true)
+    } else {
+      bluetoothEnableResultCallback = result
+      val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+      currentActivity.startActivityForResult(enableBtIntent, BLUETOOTH_ENABLE_REQUEST_CODE)
+    }
+  }
+
+  override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+    if (requestCode == BLUETOOTH_ENABLE_REQUEST_CODE) {
+      val callback = bluetoothEnableResultCallback
+      bluetoothEnableResultCallback = null
+      
+      if (resultCode == Activity.RESULT_OK) {
+        callback?.success(true)
+      } else {
+        callback?.success(false)
+      }
+      return true
+    }
+    return false
+  }
+
   private fun executeInBackground(result: Result, operation: () -> Any?) {
     executor.execute {
       try {
@@ -163,6 +208,7 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
   override fun onAttachedToActivity(binding: ActivityPluginBinding) {
     activity = binding.activity
     binding.addRequestPermissionsResultListener(this)
+    binding.addActivityResultListener(this)
   }
 
   override fun onDetachedFromActivityForConfigChanges() {
@@ -172,6 +218,7 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
   override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
     activity = binding.activity
     binding.addRequestPermissionsResultListener(this)
+    binding.addActivityResultListener(this)
   }
 
   override fun onDetachedFromActivity() {

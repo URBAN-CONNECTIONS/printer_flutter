@@ -18,6 +18,12 @@ class MethodChannelPrinterFlutter extends PrinterFlutterPlatform {
   }
 
   @override
+  Future<bool> ensureBluetoothIsOn() async {
+    final result = await methodChannel.invokeMethod<bool>('ensureBluetoothIsOn');
+    return result ?? false;
+  }
+
+  @override
   Future<bool> requestPermissions() async {
     final result = await methodChannel.invokeMethod<bool>('requestPermissions');
     return result ?? false;

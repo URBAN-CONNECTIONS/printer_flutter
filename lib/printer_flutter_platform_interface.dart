@@ -30,6 +30,11 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
     throw UnimplementedError('platformVersion() has not been implemented.');
   }
 
+  /// Checks if Bluetooth is enabled and natively prompts to enable it on Android.
+  Future<bool> ensureBluetoothIsOn() {
+    throw UnimplementedError('ensureBluetoothIsOn() has not been implemented.');
+  }
+
   /// Requests Bluetooth and location permissions on Android.
   Future<bool> requestPermissions() {
     throw UnimplementedError('requestPermissions() has not been implemented.');
