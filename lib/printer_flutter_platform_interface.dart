@@ -61,7 +61,8 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
   }
 
   /// Renders and prints a PDF file using the specified configuration.
-  Future<String?> printPdf(String filePath, PdfPrintOptions options, {int copies = 1}) {
+  Future<String?> printPdf(String filePath, PdfPrintOptions options,
+      {int copies = 1}) {
     throw UnimplementedError('printPdf() has not been implemented.');
   }
 }

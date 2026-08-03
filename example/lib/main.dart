@@ -22,10 +22,10 @@ class _MyAppState extends State<MyApp> {
   final _printerFlutterPlugin = PrinterFlutter();
 
   final TextEditingController _macController =
-      TextEditingController(text: 'DC:0D:30:FD:B5:B9');
+      TextEditingController(text: '00:19:0E:A3:03:E8');
   final List<String> _logs = [];
   bool _isLoading = false;
-  final PdfPrintStrategy _strategy = PdfPrintStrategy.pageByPage;
+  final PdfPrintStrategy _strategy = PdfPrintStrategy.dramBatch;
 
   @override
   void initState() {
@@ -129,14 +129,24 @@ PRINT 1,1
   }
 
   Future<void> _printPdfLabel() async {
+    final mac = _macController.text.trim();
+    if (mac.isEmpty) {
+      _addLog('Error: MAC address is empty');
+      return;
+    }
+
     setState(() => _isLoading = true);
     _addLog('Preparing PDF from assets...');
 
     try {
-      final bytes = await rootBundle.load('assets/sample.pdf');
+      final bytes = await rootBundle.load('assets/ticket_multa_240.pdf');
       final dir = await getTemporaryDirectory();
       final file = File('${dir.path}/sample.pdf');
       await file.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
+
+      _addLog('Connecting to $mac...');
+      final connectRes = await _printerFlutterPlugin.openPort(mac);
+      _addLog('Connect Result: $connectRes');
 
       _addLog('Sending PDF Print Command (${_strategy.name})...');
 
@@ -151,6 +161,10 @@ PRINT 1,1
         ),
       );
       _addLog('PDF Print Result: $res');
+
+      _addLog('Closing port...');
+      //final closeRes = await _printerFlutterPlugin.closePort();
+      //_addLog('Close Result: $closeRes');
     } catch (e) {
       _addLog('PDF Print Error: $e');
     } finally {

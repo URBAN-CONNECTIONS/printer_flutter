@@ -12,6 +12,9 @@ class MockPrinterFlutterPlatform
   Future<String?> getPlatformVersion() => Future.value('42');
 
   @override
+  Future<bool> ensureBluetoothIsOn() => Future.value(true);
+
+  @override
   Future<bool> requestPermissions() => Future.value(true);
 
   @override
@@ -27,7 +30,9 @@ class MockPrinterFlutterPlatform
   Future<String?> closePort() => Future.value('Success');
 
   @override
-  Future<String?> printPdf(String filePath, PdfPrintOptions options, {int copies = 1}) => Future.value('Success');
+  Future<String?> printPdf(String filePath, PdfPrintOptions options,
+          {int copies = 1}) =>
+      Future.value('Success');
 }
 
 void main() {

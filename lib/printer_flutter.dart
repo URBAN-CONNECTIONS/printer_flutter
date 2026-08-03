@@ -11,6 +11,10 @@ enum PdfPrintStrategy {
   /// Renders and prints each PDF page sequentially.
   /// Reduces peak memory usage for very long documents.
   pageByPage,
+
+  /// Buffers all rendered PDF page bitmaps into printer DRAM before printing continuously.
+  /// Eliminates stuttering between pages and prevents out-of-memory errors on small RAM printers.
+  dramBatch,
 }
 
 /// Options for printing PDF documents to a thermal printer.
@@ -86,6 +90,7 @@ class PrinterFlutter {
     PdfPrintOptions options = const PdfPrintOptions(),
     int copies = 1,
   }) {
-    return PrinterFlutterPlatform.instance.printPdf(filePath, options, copies: copies);
+    return PrinterFlutterPlatform.instance
+        .printPdf(filePath, options, copies: copies);
   }
 }

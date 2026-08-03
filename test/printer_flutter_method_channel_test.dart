@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:printer_flutter/printer_flutter.dart';
 import 'package:printer_flutter/printer_flutter_method_channel.dart';
 
 void main() {
@@ -37,7 +38,8 @@ void main() {
       return null;
     });
 
-    final result = await platform.printPdf('path/to/file.pdf', const PdfPrintOptions(), copies: 3);
+    final result = await platform
+        .printPdf('path/to/file.pdf', const PdfPrintOptions(), copies: 3);
     expect(result, 'copies=3');
   });
 }
