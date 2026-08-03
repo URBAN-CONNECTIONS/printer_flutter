@@ -61,7 +61,17 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
       "openPort" -> {
         val macAddress = call.argument<String>("macAddress") ?: ""
         executeInBackground(result) {
-          tsc.openport(macAddress)
+          try {
+            val res = tsc.openport(macAddress)
+            // Sometimes it returns "-1" on failure, we can try to close it just in case
+            if (res == "-1") {
+              try { tsc.closeport() } catch (e: Exception) {}
+            }
+            res
+          } catch (e: Exception) {
+            try { tsc.closeport() } catch (eClose: Exception) {}
+            throw e
+          }
         }
       }
       "sendTspl" -> {
@@ -83,7 +93,7 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
       }
       "closePort" -> {
         executeInBackground(result) {
-          tsc.closeport()
+          try { tsc.closeport() } catch (e: Exception) {}
         }
       }
       "printPdf" -> {
@@ -189,7 +199,8 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
       try {
         val res = operation()
         mainHandler.post {
-          result.success(res ?: "Success")
+          val value = if (res is Unit || res == null) "Success" else res
+          result.success(value)
         }
       } catch (e: Exception) {
         mainHandler.post {

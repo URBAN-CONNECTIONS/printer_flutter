@@ -1,3 +1,7 @@
+## 0.0.8
+
+* Fix `IllegalArgumentException` on Android when encoding `kotlin.Unit` return values in MethodChannel `executeInBackground`.
+
 ## 0.0.3
 
 * Added `ensureBluetoothIsOn()` to natively check and prompt the user to enable Bluetooth on Android.
