@@ -62,6 +62,11 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
         val macAddress = call.argument<String>("macAddress") ?: ""
         executeInBackground(result) {
           try {
+            // Always attempt to close any existing connection before opening a new one.
+            // This prevents the native TSC SDK from crashing (SIGSEGV) if openport is called
+            // while a socket is already open.
+            try { tsc.closeport() } catch (e: Exception) {}
+            
             val res = tsc.openport(macAddress)
             // Sometimes it returns "-1" on failure, we can try to close it just in case
             if (res == "-1") {

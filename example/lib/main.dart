@@ -139,7 +139,7 @@ PRINT 1,1
     _addLog('Preparing PDF from assets...');
 
     try {
-      final bytes = await rootBundle.load('assets/ticket_multa_240.pdf');
+      final bytes = await rootBundle.load('assets/sample.pdf');
       final dir = await getTemporaryDirectory();
       final file = File('${dir.path}/sample.pdf');
       await file.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
