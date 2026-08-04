@@ -81,15 +81,25 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
       }
       "sendTspl" -> {
         val command = call.argument<String>("command") ?: ""
+        val closePort = call.argument<Boolean>("closePort") ?: false
         executeInBackground(result) {
           tsc.sendcommand(command)
+          if (closePort) {
+            tsc.sendcommand_getstring("OUT \"COMPLETED\\r\\n\"\r\n")
+            try { tsc.closeport() } catch (e: Exception) {}
+          }
         }
       }
       "sendRawBytes" -> {
         val bytes = call.argument<ByteArray>("bytes")
+        val closePort = call.argument<Boolean>("closePort") ?: false
         executeInBackground(result) {
           if (bytes != null) {
             tsc.sendcommand(bytes)
+            if (closePort) {
+              tsc.sendcommand_getstring("OUT \"COMPLETED\\r\\n\"\r\n")
+              try { tsc.closeport() } catch (e: Exception) {}
+            }
             "Success"
           } else {
             "No bytes provided"
@@ -105,6 +115,7 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
         val filePath = call.argument<String>("filePath") ?: ""
         val options = call.argument<Map<String, Any>>("options") ?: emptyMap()
         val copies = call.argument<Int>("copies") ?: 1
+        val closePort = call.argument<Boolean>("closePort") ?: false
         executeInBackground(result) {
           PdfPrintHelper.printPdf(
             filePath = filePath,
@@ -113,6 +124,10 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
             sendCommand = { bytes -> tsc.sendcommand(bytes) },
             sendString = { str -> tsc.sendcommand(str) }
           )
+          if (closePort) {
+            tsc.sendcommand_getstring("OUT \"COMPLETED\\r\\n\"\r\n")
+            try { tsc.closeport() } catch (e: Exception) {}
+          }
           "Success"
         }
       }

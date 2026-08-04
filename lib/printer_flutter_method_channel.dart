@@ -38,16 +38,17 @@ class MethodChannelPrinterFlutter extends PrinterFlutterPlatform {
   }
 
   @override
-  Future<String?> sendTspl(String command) async {
-    final status = await methodChannel
-        .invokeMethod<String>('sendTspl', {'command': command});
+  Future<String?> sendTspl(String command, {bool closePort = false}) async {
+    final status = await methodChannel.invokeMethod<String>(
+        'sendTspl', {'command': command, 'closePort': closePort});
     return status;
   }
 
   @override
-  Future<String?> sendRawBytes(Uint8List bytes) async {
-    final status = await methodChannel
-        .invokeMethod<String>('sendRawBytes', {'bytes': bytes});
+  Future<String?> sendRawBytes(Uint8List bytes,
+      {bool closePort = false}) async {
+    final status = await methodChannel.invokeMethod<String>(
+        'sendRawBytes', {'bytes': bytes, 'closePort': closePort});
     return status;
   }
 
@@ -59,11 +60,12 @@ class MethodChannelPrinterFlutter extends PrinterFlutterPlatform {
 
   @override
   Future<String?> printPdf(String filePath, PdfPrintOptions options,
-      {int copies = 1}) async {
+      {int copies = 1, bool closePort = false}) async {
     final status = await methodChannel.invokeMethod<String>('printPdf', {
       'filePath': filePath,
       'options': options.toMap(),
       'copies': copies,
+      'closePort': closePort,
     });
     return status;
   }

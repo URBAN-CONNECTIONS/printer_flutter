@@ -46,12 +46,12 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
   }
 
   /// Sends a TSPL command string to the connected printer.
-  Future<String?> sendTspl(String command) {
+  Future<String?> sendTspl(String command, {bool closePort = false}) {
     throw UnimplementedError('sendTspl() has not been implemented.');
   }
 
   /// Sends raw bytes to the connected printer.
-  Future<String?> sendRawBytes(Uint8List bytes) {
+  Future<String?> sendRawBytes(Uint8List bytes, {bool closePort = false}) {
     throw UnimplementedError('sendRawBytes() has not been implemented.');
   }
 
@@ -62,7 +62,7 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
 
   /// Renders and prints a PDF file using the specified configuration.
   Future<String?> printPdf(String filePath, PdfPrintOptions options,
-      {int copies = 1}) {
+      {int copies = 1, bool closePort = false}) {
     throw UnimplementedError('printPdf() has not been implemented.');
   }
 }

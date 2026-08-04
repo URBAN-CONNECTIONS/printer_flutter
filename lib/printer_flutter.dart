@@ -72,25 +72,27 @@ class PrinterFlutter {
     return PrinterFlutterPlatform.instance.openPort(macAddress);
   }
 
-  Future<String?> sendTspl(String command) {
-    return PrinterFlutterPlatform.instance.sendTspl(command);
+  Future<String?> sendTspl(String command, {bool closePort = false}) {
+    return PrinterFlutterPlatform.instance
+        .sendTspl(command, closePort: closePort);
   }
 
-  Future<String?> sendRawBytes(Uint8List bytes) {
-    return PrinterFlutterPlatform.instance.sendRawBytes(bytes);
+  Future<String?> sendRawBytes(Uint8List bytes, {bool closePort = false}) {
+    return PrinterFlutterPlatform.instance
+        .sendRawBytes(bytes, closePort: closePort);
   }
 
   Future<String?> closePort() {
     return PrinterFlutterPlatform.instance.closePort();
   }
 
-  /// Renders and prints a PDF file using the specified configuration.
   Future<String?> printPdf({
     required String filePath,
     PdfPrintOptions options = const PdfPrintOptions(),
     int copies = 1,
+    bool closePort = false,
   }) {
     return PrinterFlutterPlatform.instance
-        .printPdf(filePath, options, copies: copies);
+        .printPdf(filePath, options, copies: copies, closePort: closePort);
   }
 }

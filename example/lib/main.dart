@@ -159,6 +159,7 @@ PRINT 1,1
           enableDithering: true,
           trimWhitespace: true,
         ),
+        closePort: true,
       );
       _addLog('PDF Print Result: $res');
 
