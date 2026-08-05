@@ -1,3 +1,8 @@
+## 0.0.10
+
+* Fixed `dramBatch` printing quality by adding Floyd-Steinberg error diffusion dithering to PCX encoding.
+* Fixed PCX scanline byte calculation alignment to 16-bit boundaries to prevent horizontal pixel shifting and blurriness.
+
 ## 0.0.9
 
 * Added `dramBatch` printing strategy with PCX compression.

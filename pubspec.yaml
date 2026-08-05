@@ -1,6 +1,6 @@
 name: printer_flutter
 description: "Flutter plugin for Bluetooth thermal printer discovery, SPP connection, and PDF printing with TSPL/TSC command generation."
-version: 0.0.9
+version: 0.0.10
 repository: https://github.com/URBAN-CONNECTIONS/printer_flutter
 issue_tracker: https://github.com/URBAN-CONNECTIONS/printer_flutter/issues
 topics:
