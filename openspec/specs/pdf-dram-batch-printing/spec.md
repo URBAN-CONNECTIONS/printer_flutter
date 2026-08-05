@@ -11,14 +11,15 @@ The system SHALL expose `dramBatch` as a valid `PdfPrintStrategy` option in `Pdf
 - **THEN** system serializes `strategy` string as `"dramBatch"` in platform channel invocation
 
 ### Requirement: Pre-buffering rendered PDF pages in TSPL DRAM
-When `strategy` is `"dramBatch"`, the native printer helper SHALL render each PDF page to monochrome bytes and upload it to printer DRAM via TSPL `DOWNLOAD "JOB.BAS"` as a complete script without triggering instant physical printing.
+When `strategy` is `"dramBatch"`, the native printer helper SHALL render each PDF page to monochrome bytes using PCX encoding with Floyd-Steinberg dithering support (when `enableDithering: true`) and upload each page to printer DRAM before triggering print execution.
 
-#### Scenario: Uploading page bitmaps to DRAM
-- **WHEN** multi-page PDF is processed with `dramBatch` strategy
-- **THEN** system transmits TSPL `KILL "JOB.BAS"` prior to uploading to purge any orphan script files from previous runs
-- **THEN** system transmits TSPL `DOWNLOAD "JOB.BAS"` followed by `BITMAP` commands containing monochrome byte arrays for each page `0..N-1` into printer DRAM
-- **THEN** system transmits `EOP` to finalize the script
-- **THEN** print motor remains completely stationary during the upload phase
+#### Scenario: Uploading page bitmaps to DRAM with dithering
+- **WHEN** PDF is processed with `dramBatch` strategy and `enableDithering: true`
+- **THEN** system applies Floyd-Steinberg error diffusion dithering when encoding each page into 1-bit PCX binary format
+- **THEN** system transmits TSPL `KILL "P*.PCX"` prior to uploading
+- **THEN** system downloads `P<i>.PCX` files into printer DRAM via `DOWNLOAD` commands
+- **THEN** system queues `PUTPCX 0,0,"P<i>.PCX"` commands for continuous printing
+
 
 ### Requirement: Continuous batch print execution and memory cleanup
 Once the script is resident in printer DRAM, the system SHALL transmit a command to execute the script via `RUN "JOB.BAS"`.

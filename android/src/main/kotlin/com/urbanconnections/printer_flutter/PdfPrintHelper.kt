@@ -31,8 +31,8 @@ object PdfPrintHelper {
         // Calculate dots per mm
         val dotsPerMm = dpi / 25.4
         val pixelWidth = (paperWidthMm * dotsPerMm).roundToInt()
-        // Ensure pixel width is a multiple of 8 for byte alignment
-        val alignedWidth = (pixelWidth / 8) * 8
+        // Ensure pixel width is a multiple of 16 for even byte alignment (required by PCX)
+        val alignedWidth = (pixelWidth / 16) * 16
         val widthBytes = alignedWidth / 8
 
         val fileDescriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
@@ -279,7 +279,7 @@ object PdfPrintHelper {
             }
 
             println("PdfPrintHelper: Converting page $i to 1-bit PCX...")
-            val pcxBytes = convertToPcxFile(pageBitmap)
+            val pcxBytes = convertToPcxFile(pageBitmap, enableDithering)
             val filename = "P$i.PCX"
             
             println("PdfPrintHelper: Downloading $filename to DRAM (${pcxBytes.size} bytes)...")
@@ -384,7 +384,7 @@ object PdfPrintHelper {
         return outBytes
     }
 
-    private fun convertToPcxFile(bitmap: Bitmap): ByteArray {
+    private fun convertToPcxFile(bitmap: Bitmap, dither: Boolean): ByteArray {
         val width = bitmap.width
         val height = bitmap.height
         
@@ -426,23 +426,61 @@ object PdfPrintHelper {
 
         outStream.write(header)
 
-        // RLE compress the rows
-        for (y in 0 until height) {
-            val row = ByteArray(bytesPerLine)
-            for (x in 0 until width) {
-                val pixel = pixels[y * width + x]
-                val r = Color.red(pixel)
-                val g = Color.green(pixel)
-                val b = Color.blue(pixel)
-                val gray = (r * 0.299 + g * 0.587 + b * 0.114)
-                
-                // We map White to 1 and Black to 0
-                if (gray >= 128) {
-                    val byteIdx = x / 8
-                    val bitIdx = 7 - (x % 8)
-                    row[byteIdx] = (row[byteIdx].toInt() or (1 shl bitIdx)).toByte()
+        // Compute 1-bit PCX rows (1 = White, 0 = Black)
+        val pcxRows = Array(height) { ByteArray(bytesPerLine) }
+
+        if (dither) {
+            val errors = FloatArray(width * height)
+            for (y in 0 until height) {
+                for (x in 0 until width) {
+                    val idx = y * width + x
+                    val pixel = pixels[idx]
+                    val r = Color.red(pixel)
+                    val g = Color.green(pixel)
+                    val b = Color.blue(pixel)
+                    
+                    var gray = (r * 0.299 + g * 0.587 + b * 0.114).toFloat()
+                    gray += errors[idx]
+
+                    val isBlack = gray < 128
+                    val newGray = if (isBlack) 0f else 255f
+                    val err = gray - newGray
+
+                    if (!isBlack) {
+                        val byteIdx = x / 8
+                        val bitIdx = 7 - (x % 8)
+                        pcxRows[y][byteIdx] = (pcxRows[y][byteIdx].toInt() or (1 shl bitIdx)).toByte()
+                    }
+
+                    if (x + 1 < width) errors[y * width + (x + 1)] += err * 7f / 16f
+                    if (y + 1 < height) {
+                        if (x - 1 >= 0) errors[(y + 1) * width + (x - 1)] += err * 3f / 16f
+                        errors[(y + 1) * width + x] += err * 5f / 16f
+                        if (x + 1 < width) errors[(y + 1) * width + (x + 1)] += err * 1f / 16f
+                    }
                 }
             }
+        } else {
+            for (y in 0 until height) {
+                for (x in 0 until width) {
+                    val pixel = pixels[y * width + x]
+                    val r = Color.red(pixel)
+                    val g = Color.green(pixel)
+                    val b = Color.blue(pixel)
+                    val gray = (r * 0.299 + g * 0.587 + b * 0.114)
+                    
+                    if (gray >= 128) {
+                        val byteIdx = x / 8
+                        val bitIdx = 7 - (x % 8)
+                        pcxRows[y][byteIdx] = (pcxRows[y][byteIdx].toInt() or (1 shl bitIdx)).toByte()
+                    }
+                }
+            }
+        }
+
+        // RLE compress the rows
+        for (y in 0 until height) {
+            val row = pcxRows[y]
             
             // RLE Compression for this row
             var i = 0
