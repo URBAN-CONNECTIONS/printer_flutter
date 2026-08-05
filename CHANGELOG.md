@@ -1,3 +1,10 @@
+## 0.0.9
+
+* Added `dramBatch` printing strategy with PCX compression.
+* Added socket auto-close control with TSPL OUT marker.
+* Fixed openport re-entry crash.
+* Added TSPL programming manual to documentation.
+
 ## 0.0.8
 
 * Fix `IllegalArgumentException` on Android when encoding `kotlin.Unit` return values in MethodChannel `executeInBackground`.
