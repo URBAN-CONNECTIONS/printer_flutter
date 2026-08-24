@@ -31,9 +31,13 @@ class MethodChannelPrinterFlutter extends PrinterFlutterPlatform {
   }
 
   @override
-  Future<String?> openPort(String macAddress) async {
-    final status = await methodChannel
-        .invokeMethod<String>('openPort', {'macAddress': macAddress});
+  Future<String?> openPort(String macAddress,
+      {String pin = "0000", String? fallbackPin = "1234"}) async {
+    final status = await methodChannel.invokeMethod<String>('openPort', {
+      'macAddress': macAddress,
+      'pin': pin,
+      'fallbackPin': fallbackPin,
+    });
     return status;
   }
 

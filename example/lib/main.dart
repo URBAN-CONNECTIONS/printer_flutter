@@ -23,6 +23,10 @@ class _MyAppState extends State<MyApp> {
 
   final TextEditingController _macController =
       TextEditingController(text: '00:19:0E:A3:03:E8');
+  final TextEditingController _pinController =
+      TextEditingController(text: '0000');
+  final TextEditingController _fallbackPinController =
+      TextEditingController(text: '1234');
   final List<String> _logs = [];
   bool _isLoading = false;
   final PdfPrintStrategy _strategy = PdfPrintStrategy.dramBatch;
@@ -81,7 +85,13 @@ class _MyAppState extends State<MyApp> {
     _addLog('Connecting to $mac...');
 
     try {
-      final res = await _printerFlutterPlugin.openPort(mac);
+      final res = await _printerFlutterPlugin.openPort(
+        mac,
+        pin: _pinController.text.trim(),
+        fallbackPin: _fallbackPinController.text.trim().isEmpty
+            ? null
+            : _fallbackPinController.text.trim(),
+      );
       _addLog('Connect Result: $res');
     } catch (e) {
       _addLog('Connect Error: $e');
@@ -145,7 +155,13 @@ PRINT 1,1
       await file.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
 
       _addLog('Connecting to $mac...');
-      final connectRes = await _printerFlutterPlugin.openPort(mac);
+      final connectRes = await _printerFlutterPlugin.openPort(
+        mac,
+        pin: _pinController.text.trim(),
+        fallbackPin: _fallbackPinController.text.trim().isEmpty
+            ? null
+            : _fallbackPinController.text.trim(),
+      );
       _addLog('Connect Result: $connectRes');
 
       _addLog('Sending PDF Print Command (${_strategy.name})...');
@@ -202,6 +218,30 @@ PRINT 1,1
                   border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.bluetooth),
                 ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _pinController,
+                      decoration: const InputDecoration(
+                        labelText: 'PIN (Default)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: _fallbackPinController,
+                      decoration: const InputDecoration(
+                        labelText: 'Fallback PIN',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 16),
               if (_isLoading)

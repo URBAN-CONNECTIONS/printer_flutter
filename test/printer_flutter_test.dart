@@ -1,4 +1,3 @@
-import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/services.dart';
 import 'package:printer_flutter/printer_flutter.dart';
@@ -19,7 +18,9 @@ class MockPrinterFlutterPlatform
   Future<bool> requestPermissions() => Future.value(true);
 
   @override
-  Future<String?> openPort(String macAddress) => Future.value('Success');
+  Future<String?> openPort(String macAddress,
+          {String pin = "0000", String? fallbackPin = "1234"}) =>
+      Future.value('Success');
 
   @override
   Future<String?> sendTspl(String command, {bool closePort = false}) =>
@@ -70,6 +71,24 @@ void main() {
     expect(log.first.method, 'sendTspl');
     expect(log.first.arguments['closePort'], true);
     expect(log.first.arguments['command'], 'TEST');
+  });
+
+  test('openPort serialization with pin and fallbackPin', () async {
+    final platform = MethodChannelPrinterFlutter();
+    final log = <MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(platform.methodChannel,
+            (MethodCall methodCall) async {
+      log.add(methodCall);
+      return 'Success';
+    });
+
+    await platform.openPort('MAC', pin: '9999', fallbackPin: '8888');
+    expect(log.length, 1);
+    expect(log.first.method, 'openPort');
+    expect(log.first.arguments['macAddress'], 'MAC');
+    expect(log.first.arguments['pin'], '9999');
+    expect(log.first.arguments['fallbackPin'], '8888');
   });
 
   test('printPdf serialization with closePort', () async {

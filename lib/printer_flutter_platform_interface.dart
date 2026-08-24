@@ -41,7 +41,9 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
   }
 
   /// Opens a Bluetooth connection to the printer using its MAC address.
-  Future<String?> openPort(String macAddress) {
+  /// The [pin] and [fallbackPin] are used for automatic Bluetooth pairing on Android.
+  Future<String?> openPort(String macAddress,
+      {String pin = "0000", String? fallbackPin = "1234"}) {
     throw UnimplementedError('openPort() has not been implemented.');
   }
 

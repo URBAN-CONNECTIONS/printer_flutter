@@ -3,11 +3,16 @@ package com.urbanconnections.printer_flutter
 import android.Manifest
 import android.app.Activity
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import androidx.annotation.NonNull
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -38,9 +43,70 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
   private var bluetoothEnableResultCallback: Result? = null
   private val BLUETOOTH_ENABLE_REQUEST_CODE = 1002
 
+  // Auto-pairing state
+  private var targetMacAddress: String? = null
+  private var currentPin: String = "0000"
+  private var currentFallbackPin: String? = "1234"
+  private var receiverRegistered = false
+
   // Single thread executor to run printer commands off the main thread
   private val executor = Executors.newSingleThreadExecutor()
   private val mainHandler = Handler(Looper.getMainLooper())
+
+  private val pairingReceiver = object : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+      val action = intent.action
+      
+      val device: BluetoothDevice? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+      } else {
+        @Suppress("DEPRECATION")
+        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+      }
+
+      if (device == null || targetMacAddress == null) return
+      if (!device.address.equals(targetMacAddress, ignoreCase = true)) return
+
+      if (BluetoothDevice.ACTION_PAIRING_REQUEST == action) {
+        val pairingVariant = intent.getIntExtra(BluetoothDevice.EXTRA_PAIRING_VARIANT, BluetoothDevice.ERROR)
+        if (pairingVariant == BluetoothDevice.PAIRING_VARIANT_PIN || pairingVariant == 0) {
+          try {
+            val pinBytes = currentPin.toByteArray(Charsets.UTF_8)
+            device.setPin(pinBytes)
+            
+            try {
+              device.javaClass.getMethod("setPairingConfirmation", Boolean::class.javaPrimitiveType).invoke(device, true)
+            } catch (e: Exception) {
+              Log.w("PrinterFlutterPlugin", "setPairingConfirmation failed: ${e.message}")
+            }
+            
+            abortBroadcast()
+            Log.d("PrinterFlutterPlugin", "Auto-pairing with PIN $currentPin for ${device.address}")
+          } catch (e: Exception) {
+            Log.e("PrinterFlutterPlugin", "Failed to auto-pair: ${e.message}")
+          }
+        }
+      } else if (BluetoothDevice.ACTION_BOND_STATE_CHANGED == action) {
+        val bondState = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
+        val previousBondState = intent.getIntExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, BluetoothDevice.ERROR)
+        
+        if (bondState == BluetoothDevice.BOND_NONE && previousBondState == BluetoothDevice.BOND_BONDING) {
+          val reason = intent.getIntExtra("android.bluetooth.device.extra.REASON", -1)
+          // 1 is UNBOND_REASON_AUTH_FAILED
+          if (reason == 1 && currentFallbackPin != null && currentPin != currentFallbackPin) {
+            Log.d("PrinterFlutterPlugin", "Pairing failed with $currentPin, trying fallback $currentFallbackPin")
+            currentPin = currentFallbackPin!!
+            currentFallbackPin = null // Only fallback once
+            try {
+               device.javaClass.getMethod("createBond").invoke(device)
+            } catch (e: Exception) {
+               Log.e("PrinterFlutterPlugin", "Failed to trigger bond for fallback: ${e.message}")
+            }
+          }
+        }
+      }
+    }
+  }
 
   override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
     channel = MethodChannel(flutterPluginBinding.binaryMessenger, "printer_flutter")
@@ -60,15 +126,17 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
       }
       "openPort" -> {
         val macAddress = call.argument<String>("macAddress") ?: ""
+        
+        targetMacAddress = macAddress.uppercase()
+        currentPin = call.argument<String>("pin") ?: "0000"
+        currentFallbackPin = call.argument<String>("fallbackPin")
+
         executeInBackground(result) {
           try {
             // Always attempt to close any existing connection before opening a new one.
-            // This prevents the native TSC SDK from crashing (SIGSEGV) if openport is called
-            // while a socket is already open.
             try { tsc.closeport() } catch (e: Exception) {}
             
             val res = tsc.openport(macAddress)
-            // Sometimes it returns "-1" on failure, we can try to close it just in case
             if (res == "-1") {
               try { tsc.closeport() } catch (e: Exception) {}
             }
@@ -235,14 +303,37 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
     executor.shutdown()
   }
 
+  private fun registerReceiver(context: Context) {
+    if (!receiverRegistered) {
+      val filter = IntentFilter().apply {
+        addAction(BluetoothDevice.ACTION_PAIRING_REQUEST)
+        addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+        priority = IntentFilter.SYSTEM_HIGH_PRIORITY
+      }
+      context.registerReceiver(pairingReceiver, filter)
+      receiverRegistered = true
+    }
+  }
+
+  private fun unregisterReceiver(context: Context) {
+    if (receiverRegistered) {
+      try {
+        context.unregisterReceiver(pairingReceiver)
+      } catch (e: Exception) {}
+      receiverRegistered = false
+    }
+  }
+
   // ActivityAware implementation
   override fun onAttachedToActivity(binding: ActivityPluginBinding) {
     activity = binding.activity
     binding.addRequestPermissionsResultListener(this)
     binding.addActivityResultListener(this)
+    registerReceiver(binding.activity)
   }
 
   override fun onDetachedFromActivityForConfigChanges() {
+    activity?.let { unregisterReceiver(it) }
     activity = null
   }
 
@@ -250,9 +341,11 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
     activity = binding.activity
     binding.addRequestPermissionsResultListener(this)
     binding.addActivityResultListener(this)
+    registerReceiver(binding.activity)
   }
 
   override fun onDetachedFromActivity() {
+    activity?.let { unregisterReceiver(it) }
     activity = null
   }
 }

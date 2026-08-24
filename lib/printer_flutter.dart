@@ -68,8 +68,10 @@ class PrinterFlutter {
     return PrinterFlutterPlatform.instance.requestPermissions();
   }
 
-  Future<String?> openPort(String macAddress) {
-    return PrinterFlutterPlatform.instance.openPort(macAddress);
+  Future<String?> openPort(String macAddress,
+      {String pin = "0000", String? fallbackPin = "1234"}) {
+    return PrinterFlutterPlatform.instance
+        .openPort(macAddress, pin: pin, fallbackPin: fallbackPin);
   }
 
   Future<String?> sendTspl(String command, {bool closePort = false}) {
