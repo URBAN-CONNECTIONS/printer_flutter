@@ -13,10 +13,10 @@ The Android platform implementation SHALL compile and package `tscsdk.jar` from 
 ### Requirement: Native TSC Connection and Command Execution
 The Android native plugin SHALL expose MethodChannel endpoints to open connections, transmit TSPL commands, and close ports using `TSCActivity`, `TSCUSBActivity`, and `TscWifiActivity`.
 
-#### Scenario: Opening Bluetooth printer port
-- **GIVEN** a valid Bluetooth MAC address
+#### Scenario: Opening Bluetooth printer port with PIN configuration
+- **GIVEN** a valid Bluetooth MAC address and optional `pin` and `fallbackPin` arguments
 - **WHEN** Flutter invokes `openPort` with the MAC address over `MethodChannel`
-- **THEN** the native Android plugin SHALL delegate to `TSCActivity.openport` and return the connection status result.
+- **THEN** the native Android plugin SHALL update the target MAC address and active PIN configuration, delegate to `TSCActivity.openport`, and return the connection status result.
 
 #### Scenario: Transmitting TSPL printing commands
 - **GIVEN** an active connection to a TSC printer
