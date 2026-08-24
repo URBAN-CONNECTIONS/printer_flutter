@@ -1,3 +1,10 @@
+## 0.0.11
+
+* Added automatic Bluetooth PIN pairing for Android legacy SPP connections.
+* Added `pin` (default: "0000") and `fallbackPin` (default: "1234") optional parameters to `openPort` API.
+* MAC address filtering added to Android pairing receiver to prevent interference with other Bluetooth devices.
+* Activity-bound receiver lifecycle implemented for zero-battery overhead auto-pairing.
+
 ## 0.0.10
 
 * Fixed `dramBatch` printing quality by adding Floyd-Steinberg error diffusion dithering to PCX encoding.
