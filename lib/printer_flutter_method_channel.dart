@@ -31,46 +31,84 @@ class MethodChannelPrinterFlutter extends PrinterFlutterPlatform {
   }
 
   @override
-  Future<String?> openPort(String macAddress,
-      {String pin = "0000", String? fallbackPin = "1234"}) async {
-    final status = await methodChannel.invokeMethod<String>('openPort', {
+  Future<String?> openPort(
+    String macAddress, {
+    String pin = "0000",
+    String? fallbackPin = "1234",
+    Duration connectTimeout = PrinterLimits.connectTimeout,
+    bool resetPrinterAfterFailure = false,
+  }) {
+    return _invoke<String>('openPort', {
       'macAddress': macAddress,
       'pin': pin,
       'fallbackPin': fallbackPin,
+      'connectTimeoutMs': connectTimeout.inMilliseconds,
+      'resetPrinterAfterFailure': resetPrinterAfterFailure,
     });
-    return status;
   }
 
   @override
-  Future<String?> sendTspl(String command, {bool closePort = false}) async {
-    final status = await methodChannel.invokeMethod<String>(
-        'sendTspl', {'command': command, 'closePort': closePort});
-    return status;
+  Future<String?> sendTspl(
+    String command, {
+    bool closePort = false,
+    Duration writeTimeout = PrinterLimits.writeTimeout,
+    Duration completionTimeout = PrinterLimits.completionTimeout,
+  }) {
+    return _invoke<String>('sendTspl', {
+      'command': command,
+      'closePort': closePort,
+      'writeTimeoutMs': writeTimeout.inMilliseconds,
+      'completionTimeoutMs': completionTimeout.inMilliseconds,
+    });
   }
 
   @override
-  Future<String?> sendRawBytes(Uint8List bytes,
-      {bool closePort = false}) async {
-    final status = await methodChannel.invokeMethod<String>(
-        'sendRawBytes', {'bytes': bytes, 'closePort': closePort});
-    return status;
+  Future<String?> sendRawBytes(
+    Uint8List bytes, {
+    bool closePort = false,
+    Duration writeTimeout = PrinterLimits.writeTimeout,
+    Duration completionTimeout = PrinterLimits.completionTimeout,
+  }) {
+    return _invoke<String>('sendRawBytes', {
+      'bytes': bytes,
+      'closePort': closePort,
+      'writeTimeoutMs': writeTimeout.inMilliseconds,
+      'completionTimeoutMs': completionTimeout.inMilliseconds,
+    });
   }
 
   @override
-  Future<String?> closePort() async {
-    final status = await methodChannel.invokeMethod<String>('closePort');
-    return status;
-  }
+  Future<String?> closePort() => _invoke<String>('closePort');
 
   @override
-  Future<String?> printPdf(String filePath, PdfPrintOptions options,
-      {int copies = 1, bool closePort = false}) async {
-    final status = await methodChannel.invokeMethod<String>('printPdf', {
+  Future<void> cancel() => _invoke<String>('cancel');
+
+  @override
+  Future<String?> printPdf(
+    String filePath,
+    PdfPrintOptions options, {
+    int copies = 1,
+    bool closePort = false,
+    Duration writeTimeout = PrinterLimits.writeTimeout,
+    Duration completionTimeout = PrinterLimits.completionTimeout,
+  }) {
+    return _invoke<String>('printPdf', {
       'filePath': filePath,
       'options': options.toMap(),
       'copies': copies,
       'closePort': closePort,
+      'writeTimeoutMs': writeTimeout.inMilliseconds,
+      'completionTimeoutMs': completionTimeout.inMilliseconds,
     });
-    return status;
+  }
+
+  /// Invokes [method] and turns native errors into [PrinterException].
+  Future<T?> _invoke<T>(String method,
+      [Map<String, dynamic>? arguments]) async {
+    try {
+      return await methodChannel.invokeMethod<T>(method, arguments);
+    } on PlatformException catch (e) {
+      throw PrinterException(PrinterException.typeFromCode(e.code), e.message);
+    }
   }
 }

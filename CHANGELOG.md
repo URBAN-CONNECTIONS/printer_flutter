@@ -1,3 +1,12 @@
+## 0.1.0
+
+* **BREAKING**: removed the TSC SDK (`tscsdk.jar`). The plugin now opens, writes, waits on and closes the Bluetooth SPP socket itself, with a limit on every step, so a printer that stops answering can no longer leave the phone unable to print.
+* **BREAKING**: failures throw `PrinterException` with a `PrinterErrorType` (`notConnected`, `connectionLost`, `timeout`, `cancelled`, `unknown`). `openPort` throws when it cannot connect instead of returning `"-1"`.
+* Added `connectTimeout`, `writeTimeout` and `completionTimeout` parameters, with defaults in `PrinterLimits` (15 s, 20 s per chunk, 60 s).
+* Added `cancel()` to abort the job in progress.
+* Added opt-in `resetPrinterAfterFailure` to `openPort`: resets the printer with `<ESC>!R` after a failed job.
+* The wait for the completion marker now finds it when it arrives split across reads.
+
 ## 0.0.11
 
 * Added automatic Bluetooth PIN pairing for Android legacy SPP connections.

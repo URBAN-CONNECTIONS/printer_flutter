@@ -127,6 +127,40 @@ class _MyAppState extends State<MyApp> {
 
 ---
 
+## Limits and errors
+
+Every call ends within its limits; no call can wait forever.
+
+| Limit | Default | Applies to |
+|---|---|---|
+| `connectTimeout` | 15 s | `openPort` |
+| `writeTimeout` | 20 s per 4 KB chunk | `printPdf`, `sendTspl`, `sendRawBytes` |
+| `completionTimeout` | 60 s from the last byte | the printer's confirmation when `closePort: true`; includes printing every copy |
+
+Failures throw `PrinterException`:
+
+```dart
+try {
+  await printer.openPort(mac);
+  await printer.printPdf(
+    filePath: path,
+    closePort: true,
+    completionTimeout: const Duration(seconds: 90),
+  );
+} on PrinterException catch (e) {
+  switch (e.type) {
+    case PrinterErrorType.notConnected:
+    case PrinterErrorType.connectionLost:
+    case PrinterErrorType.timeout:
+    case PrinterErrorType.cancelled:
+    case PrinterErrorType.unknown:
+      // Show the error; the next print starts on a new connection.
+  }
+}
+```
+
+`cancel()` aborts the job in progress. `openPort(mac, resetPrinterAfterFailure: true)` resets the printer with `<ESC>!R` before connecting when the previous job failed; enable it only for printers that support that command.
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

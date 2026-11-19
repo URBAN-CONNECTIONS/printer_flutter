@@ -1,0 +1,3 @@
+# 1. El plugin maneja el socket Bluetooth sin el SDK de TSC
+
+El SDK de TSC espera la respuesta de la impresora sin límite, no se puede abortar y convierte los errores en `"-1"`, lo que dejaba celulares con una impresión colgada hasta reiniciarlos. El plugin solo lo usaba para abrir, mandar, esperar y cerrar; los comandos TSPL ya los arma él mismo. Por eso ahora maneja directamente el socket Bluetooth de Android, con límites y errores tipados. Se descartó leer el stream del SDK por reflexión (frágil, y sigue tragándose los errores al escribir) y abandonar el hilo atascado (deja hilos vivos y búferes estáticos compartidos).
