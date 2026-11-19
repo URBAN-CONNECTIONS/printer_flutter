@@ -42,6 +42,10 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
 
   /// Opens a Bluetooth connection to the printer using its MAC address.
   /// The [pin] and [fallbackPin] are used for automatic Bluetooth pairing on Android.
+  ///
+  /// Gives up after [connectTimeout] with a [PrinterException] of type
+  /// [PrinterErrorType.notConnected]. With [resetPrinterAfterFailure], the printer
+  /// is reset with `<ESC>!R` first when the previous job failed.
   Future<String?> openPort(
     String macAddress, {
     String pin = "0000",
@@ -52,6 +56,10 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
     throw UnimplementedError('openPort() has not been implemented.');
   }
 
+  /// Sends a TSPL command string to the connected printer.
+  ///
+  /// Each chunk must be accepted within [writeTimeout]. With [closePort], waits
+  /// up to [completionTimeout] for the printer to confirm, then closes the port.
   Future<String?> sendTspl(
     String command, {
     bool closePort = false,
@@ -61,6 +69,10 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
     throw UnimplementedError('sendTspl() has not been implemented.');
   }
 
+  /// Sends raw bytes to the connected printer.
+  ///
+  /// Each chunk must be accepted within [writeTimeout]. With [closePort], waits
+  /// up to [completionTimeout] for the printer to confirm, then closes the port.
   Future<String?> sendRawBytes(
     Uint8List bytes, {
     bool closePort = false,
@@ -70,14 +82,21 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
     throw UnimplementedError('sendRawBytes() has not been implemented.');
   }
 
+  /// Closes the active Bluetooth connection.
   Future<String?> closePort() {
     throw UnimplementedError('closePort() has not been implemented.');
   }
 
+  /// Aborts the job in progress; its call ends with a [PrinterException] of type
+  /// [PrinterErrorType.cancelled]. Does nothing when no job is running.
   Future<void> cancel() {
     throw UnimplementedError('cancel() has not been implemented.');
   }
 
+  /// Renders and prints a PDF file using the specified configuration.
+  ///
+  /// Each chunk must be accepted within [writeTimeout]. With [closePort], the
+  /// printer must confirm within [completionTimeout], counted from the last byte.
   Future<String?> printPdf(
     String filePath,
     PdfPrintOptions options, {

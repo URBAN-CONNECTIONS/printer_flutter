@@ -30,6 +30,14 @@ The plugin SHALL expose `cancel()`, which aborts the job in progress.
 - **WHEN** `cancel()` is called while a job is running
 - **THEN** that job SHALL fail with `cancelled` and the next job SHALL run on a new connection
 
+#### Scenario: Cancel with nothing running
+- **WHEN** `cancel()` is called while no call is running
+- **THEN** it SHALL do nothing and the open connection SHALL stay usable
+
+#### Scenario: Cancel while the printer resets
+- **WHEN** `cancel()` is called during `openPort` while the plugin waits for the printer after the reset
+- **THEN** `openPort` SHALL end with `cancelled` and SHALL NOT connect
+
 ### Requirement: Optional printer reset after a failure
 When `openPort` is called with `resetPrinterAfterFailure: true` and the previous job hung, was cancelled or failed, the plugin SHALL send `<ESC>!R`, wait for the printer and then connect.
 

@@ -18,9 +18,16 @@
 - [x] 3.2 Dart tests for arguments and error mapping
 - [x] 3.3 ADR, README, CHANGELOG and version 0.1.0
 
-## 4. Device verification (manual)
+## 4. QA follow-up
 
-- [ ] 4.1 On a Ribetec printer, measure the longest ticket with 2 copies and confirm the 60 s default
-- [ ] 4.2 Turn the printer off mid-print: error within the limit, next print works without restarting the phone
-- [ ] 4.3 Remove the paper mid-print and cancel mid-print
-- [ ] 4.4 Check whether the Ribetec answers `<ESC>!R` and `<ESC>!?`
+- [x] 4.1 Move the open, job, close, cancel and reset sequence into `PrinterSession`, testable with fake transports
+- [x] 4.2 `cancel()` acts only while a call is running; a cancel during the reset wait ends `openPort` with `cancelled`
+- [x] 4.3 JVM tests for the session: not connected, completion request and marker, reset after failure, cancel idle, cancel during a job, cancel during the reset wait
+- [x] 4.4 Restore the `///` docs of the platform interface and document `cancel()` and `PrinterException`
+
+## 5. Device verification (manual)
+
+- [ ] 5.1 On a Ribetec printer, measure the longest ticket with 2 copies and confirm the 60 s default
+- [ ] 5.2 Turn the printer off mid-print: error within the limit, next print works without restarting the phone
+- [ ] 5.3 Remove the paper mid-print and cancel mid-print
+- [ ] 5.4 Check whether the Ribetec answers `<ESC>!R` and `<ESC>!?`

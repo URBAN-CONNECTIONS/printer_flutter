@@ -122,6 +122,7 @@ class PrinterFlutter {
     );
   }
 
+  /// Closes the active Bluetooth connection.
   Future<String?> closePort() {
     return PrinterFlutterPlatform.instance.closePort();
   }
@@ -191,9 +192,13 @@ enum PrinterErrorType {
 
 /// Error thrown by the printer calls.
 class PrinterException implements Exception {
+  /// Creates an error of the given [type], with an optional [message].
   const PrinterException(this.type, [this.message]);
 
+  /// Why the call failed.
   final PrinterErrorType type;
+
+  /// What the native side reported, if anything.
   final String? message;
 
   /// Native error codes, as sent by the Android plugin.

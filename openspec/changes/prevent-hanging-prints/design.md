@@ -20,7 +20,7 @@ Android sockets have no read or write timeout, but closing a socket unblocks any
 `OUT "COMPLETED\r\n"`, a blank line and `OUT "ENDLINE"` are sent exactly as before, and the plugin waits for `ENDLINE` in the bytes actually read.
 
 ### Cancel runs on the main thread
-`cancel()` closes the current connection directly instead of queuing behind the job it must stop.
+`cancel()` closes the current connection directly instead of queuing behind the job it must stop. It acts only while a call (`openPort`, a job or `closePort`) is running, so a cancel between two jobs never closes the idle connection. A cancel that arrives while `openPort` has no connection yet (for example during the wait after a printer reset) is remembered and ends that call with `cancelled`.
 
 ### Printer reset is opt-in
 `<ESC>!R` drops the Bluetooth link and takes a few seconds, so it runs only after a failed job and only when the caller asks. It waits 4 s for the printer before reconnecting.
@@ -47,3 +47,10 @@ Flutter            Plugin (main)        Job thread                 Watchdog     
 - [The 60 s default may be short for long tickets] → it is configurable per call; apps should set it to twice the worst case measured on their printer.
 - [A late answer after a timeout] → the app sees an error and a retry may print a duplicate; accepted by the apps over a phone that cannot print.
 - [`<ESC>!R` unsupported on some TSPL clones] → off by default.
+
+## Documentation from the issue
+
+- Add this decision record to `docs/adr/`, exactly as written. It is numbered when it is written.
+
+**El plugin maneja el socket Bluetooth sin el SDK de TSC**
+El SDK de TSC espera la respuesta de la impresora sin límite, no se puede abortar y convierte los errores en `"-1"`, lo que dejaba celulares con una impresión colgada hasta reiniciarlos. El plugin solo lo usaba para abrir, mandar, esperar y cerrar; los comandos TSPL ya los arma él mismo. Por eso ahora maneja directamente el socket Bluetooth de Android, con límites y errores tipados. Se descartó leer el stream del SDK por reflexión (frágil, y sigue tragándose los errores al escribir) y abandonar el hilo atascado (deja hilos vivos y búferes estáticos compartidos).

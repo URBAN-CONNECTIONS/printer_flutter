@@ -52,10 +52,11 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
   private val watchdog: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
   private val mainHandler = Handler(Looper.getMainLooper())
 
-  // The open connection, read by cancel() from the main thread.
-  @Volatile private var connection: PrinterConnection? = null
-  // true when the last job hung, was cancelled or failed; the next openPort may reset the printer.
-  @Volatile private var lastJobFailed = false
+  // The connection and the order of open, jobs, close and cancel.
+  private val session = PrinterSession(
+    newConnection = { mac -> PrinterConnection(BluetoothSocketTransport(mac), watchdog) },
+    onWarning = { Log.w("PrinterFlutterPlugin", it) },
+  )
 
   private val pairingReceiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -130,7 +131,7 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
       }
       "openPort" -> {
         val macAddress = call.argument<String>("macAddress") ?: ""
-        val connectTimeoutMs = call.longArgument("connectTimeoutMs", DEFAULT_CONNECT_TIMEOUT_MS)
+        val connectTimeoutMs = call.longArgument("connectTimeoutMs", PrinterSession.DEFAULT_CONNECT_TIMEOUT_MS)
         val resetAfterFailure = call.argument<Boolean>("resetPrinterAfterFailure") ?: false
 
         targetMacAddress = macAddress.uppercase()
@@ -138,29 +139,15 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
         currentFallbackPin = call.argument<String>("fallbackPin")
 
         executeInBackground(result) {
-          // Always close any existing connection before opening a new one.
-          closeConnection()
-          try {
-            if (resetAfterFailure && lastJobFailed) {
-              resetPrinter(macAddress, connectTimeoutMs)
-            }
-            val newConnection = PrinterConnection(BluetoothSocketTransport(macAddress), watchdog)
-            connection = newConnection
-            newConnection.open(connectTimeoutMs)
-            "Success"
-          } catch (e: Throwable) {
-            lastJobFailed = true
-            closeConnection()
-            throw e
-          }
+          session.open(macAddress, connectTimeoutMs, resetAfterFailure)
         }
       }
       "sendTspl" -> {
         val command = call.argument<String>("command") ?: ""
         val closePort = call.argument<Boolean>("closePort") ?: false
-        val limits = JobLimits.from(call)
+        val limits = jobLimitsFrom(call)
         executeInBackground(result) {
-          runJob(closePort, limits) { conn ->
+          session.runJob(closePort, limits) { conn ->
             conn.write(command.toByteArray(), limits.writeTimeoutMs)
           }
         }
@@ -168,30 +155,21 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
       "sendRawBytes" -> {
         val bytes = call.argument<ByteArray>("bytes")
         val closePort = call.argument<Boolean>("closePort") ?: false
-        val limits = JobLimits.from(call)
+        val limits = jobLimitsFrom(call)
         executeInBackground(result) {
           if (bytes == null) {
             "No bytes provided"
           } else {
-            runJob(closePort, limits) { conn -> conn.write(bytes, limits.writeTimeoutMs) }
+            session.runJob(closePort, limits) { conn -> conn.write(bytes, limits.writeTimeoutMs) }
           }
         }
       }
       "closePort" -> {
-        executeInBackground(result) {
-          val current = connection
-          if (current != null && current.isOpen) {
-            // Without waiting for the completion marker, give the printer time to receive
-            // the last bytes before closing, as the TSC SDK did.
-            Thread.sleep(CLOSE_GRACE_MS)
-          }
-          closeConnection()
-          "Success"
-        }
+        executeInBackground(result) { session.closePort() }
       }
       "cancel" -> {
         // Runs on the main thread, not on the executor: it must reach a job in progress.
-        connection?.cancel()
+        session.cancel()
         result.success("Success")
       }
       "printPdf" -> {
@@ -199,9 +177,9 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
         val options = call.argument<Map<String, Any>>("options") ?: emptyMap()
         val copies = call.argument<Int>("copies") ?: 1
         val closePort = call.argument<Boolean>("closePort") ?: false
-        val limits = JobLimits.from(call)
+        val limits = jobLimitsFrom(call)
         executeInBackground(result) {
-          runJob(closePort, limits) { conn ->
+          session.runJob(closePort, limits) { conn ->
             PdfPrintHelper.printPdf(
               filePath = filePath,
               options = options,
@@ -295,59 +273,6 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
     return false
   }
 
-  /**
-   * Sends a job on the open connection. With [closePort], waits for the printer to confirm it
-   * processed everything (TSPL `OUT` marker) within the limit, then closes the connection.
-   * Any failure closes the connection, so the next job starts on a new one.
-   */
-  private fun runJob(closePort: Boolean, limits: JobLimits, send: (PrinterConnection) -> Unit): String {
-    val conn = connection
-    if (conn == null || !conn.isOpen) {
-      lastJobFailed = true
-      throw PrinterException(PrinterErrorCode.NOT_CONNECTED, "No hay conexión abierta con la impresora; llama a openPort primero")
-    }
-    try {
-      send(conn)
-      if (closePort) {
-        conn.write(COMPLETION_REQUEST, limits.writeTimeoutMs)
-        conn.awaitMarker(COMPLETION_MARKER, limits.completionTimeoutMs)
-        closeConnection()
-      }
-      lastJobFailed = false
-      return "Success"
-    } catch (e: Throwable) {
-      lastJobFailed = true
-      closeConnection()
-      throw e
-    }
-  }
-
-  /**
-   * Sends `<ESC>!R` so a printer left waiting for the rest of an image starts clean.
-   * The reset drops the Bluetooth link, so this waits for the printer to come back before the
-   * caller reconnects. Failing to reset is not an error: the caller still tries to connect.
-   */
-  private fun resetPrinter(macAddress: String, connectTimeoutMs: Long) {
-    val resetConnection = PrinterConnection(BluetoothSocketTransport(macAddress), watchdog)
-    connection = resetConnection
-    try {
-      resetConnection.open(connectTimeoutMs)
-      resetConnection.write(RESET_COMMAND, DEFAULT_WRITE_TIMEOUT_MS)
-    } catch (e: PrinterException) {
-      if (e.code == PrinterErrorCode.CANCELLED) throw e
-      Log.w("PrinterFlutterPlugin", "Printer reset failed: ${e.message}")
-    } finally {
-      resetConnection.close()
-      connection = null
-    }
-    Thread.sleep(RESET_SETTLE_MS)
-  }
-
-  private fun closeConnection() {
-    connection?.close()
-    connection = null
-  }
-
   private fun executeInBackground(result: Result, operation: () -> Any?) {
     executor.execute {
       try {
@@ -369,34 +294,14 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
     }
   }
 
-  private class JobLimits(val writeTimeoutMs: Long, val completionTimeoutMs: Long) {
-    companion object {
-      fun from(call: MethodCall) = JobLimits(
-        writeTimeoutMs = call.longArgument("writeTimeoutMs", DEFAULT_WRITE_TIMEOUT_MS),
-        completionTimeoutMs = call.longArgument("completionTimeoutMs", DEFAULT_COMPLETION_TIMEOUT_MS),
-      )
-    }
-  }
-
-  companion object {
-    const val DEFAULT_CONNECT_TIMEOUT_MS = 15_000L
-    const val DEFAULT_WRITE_TIMEOUT_MS = 20_000L
-    const val DEFAULT_COMPLETION_TIMEOUT_MS = 60_000L
-    const val CLOSE_GRACE_MS = 1_500L
-    const val RESET_SETTLE_MS = 4_000L
-
-    /** Same bytes the TSC SDK sent: an `OUT` marker plus the `ENDLINE` its reader waited for. */
-    val COMPLETION_REQUEST: ByteArray =
-      ("OUT \"COMPLETED\\r\\n\"\r\n" + "\r\n" + "OUT \"ENDLINE\"\r\n").toByteArray(Charsets.US_ASCII)
-    const val COMPLETION_MARKER = "ENDLINE"
-
-    /** TSPL immediate command `<ESC>!R`: resets the printer and deletes downloaded files. */
-    val RESET_COMMAND: ByteArray = byteArrayOf(0x1B, '!'.code.toByte(), 'R'.code.toByte())
-  }
+  private fun jobLimitsFrom(call: MethodCall) = JobLimits(
+    writeTimeoutMs = call.longArgument("writeTimeoutMs", PrinterSession.DEFAULT_WRITE_TIMEOUT_MS),
+    completionTimeoutMs = call.longArgument("completionTimeoutMs", PrinterSession.DEFAULT_COMPLETION_TIMEOUT_MS),
+  )
 
   override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
     channel.setMethodCallHandler(null)
-    connection?.cancel()
+    session.shutdown()
     executor.shutdown()
     watchdog.shutdown()
   }

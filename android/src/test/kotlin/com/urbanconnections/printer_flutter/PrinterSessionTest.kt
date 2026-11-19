@@ -1,0 +1,301 @@
+package com.urbanconnections.printer_flutter
+
+import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.thread
+import kotlin.test.AfterTest
+import kotlin.test.BeforeTest
+import kotlin.test.Test
+import kotlin.test.assertContentEquals
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+
+/** The order of open, jobs, close, cancel and reset, on fake transports. */
+class PrinterSessionTest {
+  private lateinit var watchdog: ScheduledExecutorService
+  private val transports = mutableListOf<FakeTransport>()
+  private val limits = JobLimits(writeTimeoutMs = 2_000, completionTimeoutMs = 300)
+
+  @BeforeTest
+  fun setUp() {
+    watchdog = Executors.newSingleThreadScheduledExecutor()
+  }
+
+  @AfterTest
+  fun tearDown() {
+    watchdog.shutdownNow()
+  }
+
+  private fun session(
+    sleeper: (Long) -> Unit = {},
+    configure: (FakeTransport) -> Unit = {},
+  ) = PrinterSession(
+    newConnection = {
+      val transport = FakeTransport()
+      configure(transport)
+      transports.add(transport)
+      PrinterConnection(transport, watchdog, pollIntervalMs = 5)
+    },
+    sleeper = sleeper,
+    resetSettleMs = 300,
+    closeGraceMs = 0,
+  )
+
+  @Test
+  fun runJob_withoutAnOpenConnectionFailsWithNotConnected() {
+    val session = session()
+
+    val error = assertFailsWith<PrinterException> {
+      session.runJob(closePort = false, limits = limits) { it.write("x".toByteArray(), 1_000) }
+    }
+
+    assertEquals(PrinterErrorCode.NOT_CONNECTED, error.code)
+  }
+
+  @Test
+  fun runJob_withClosePortSendsTheRequestWaitsForTheMarkerAndCloses() {
+    val session = session { it.autoReply = true }
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+
+    val result = session.runJob(closePort = true, limits = limits) { it.write("JOB".toByteArray(), 1_000) }
+
+    assertEquals("Success", result)
+    val transport = transports.single()
+    assertContentEquals(
+      "JOB".toByteArray() + PrinterSession.COMPLETION_REQUEST,
+      transport.written.toByteArray(),
+    )
+    assertTrue(transport.closed)
+  }
+
+  @Test
+  fun runJob_withoutClosePortKeepsTheConnectionOpen() {
+    val session = session()
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+
+    session.runJob(closePort = false, limits = limits) { it.write("JOB".toByteArray(), 1_000) }
+
+    val transport = transports.single()
+    assertContentEquals("JOB".toByteArray(), transport.written.toByteArray())
+    assertFalse(transport.closed)
+  }
+
+  @Test
+  fun runJob_whenThePrinterDoesNotAnswerTimesOutAndTheNextJobRunsOnANewConnection() {
+    val session = session()
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+
+    val error = assertFailsWith<PrinterException> {
+      session.runJob(closePort = true, limits = limits) { it.write("JOB".toByteArray(), 1_000) }
+    }
+    assertEquals(PrinterErrorCode.TIMEOUT, error.code)
+    assertTrue(transports[0].closed)
+
+    // The failed job left no connection behind: a print fails fast, a new open works.
+    val notConnected = assertFailsWith<PrinterException> {
+      session.runJob(closePort = false, limits = limits) { it.write("x".toByteArray(), 1_000) }
+    }
+    assertEquals(PrinterErrorCode.NOT_CONNECTED, notConnected.code)
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+    session.runJob(closePort = false, limits = limits) { it.write("NEXT".toByteArray(), 1_000) }
+    assertEquals(2, transports.size)
+    assertContentEquals("NEXT".toByteArray(), transports[1].written.toByteArray())
+  }
+
+  @Test
+  fun open_afterAFailedJobResetsThePrinterBeforeConnectingWhenAsked() {
+    val session = session()
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+    assertFailsWith<PrinterException> {
+      session.runJob(closePort = true, limits = limits) { it.write("JOB".toByteArray(), 1_000) }
+    }
+
+    session.open("AA:BB", 1_000, resetAfterFailure = true)
+
+    // transports: the failed job, the reset link, the new connection.
+    assertEquals(3, transports.size)
+    assertContentEquals(PrinterSession.RESET_COMMAND, transports[1].written.toByteArray())
+    assertTrue(transports[1].closed)
+    assertTrue(transports[2].written.size() == 0)
+    assertFalse(transports[2].closed)
+  }
+
+  @Test
+  fun open_doesNotResetAfterASuccessfulJob() {
+    val session = session { it.autoReply = true }
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+    session.runJob(closePort = true, limits = limits) { it.write("JOB".toByteArray(), 1_000) }
+
+    session.open("AA:BB", 1_000, resetAfterFailure = true)
+
+    assertEquals(2, transports.size)
+    assertTrue(transports.none { it.written.toByteArray().contentEquals(PrinterSession.RESET_COMMAND) })
+  }
+
+  @Test
+  fun open_doesNotResetWhenNotAskedEvenAfterAFailure() {
+    val session = session()
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+    assertFailsWith<PrinterException> {
+      session.runJob(closePort = true, limits = limits) { it.write("JOB".toByteArray(), 1_000) }
+    }
+
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+
+    assertEquals(2, transports.size)
+  }
+
+  @Test
+  fun open_resetsOnlyOnceAfterAFailure() {
+    val session = session()
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+    assertFailsWith<PrinterException> {
+      session.runJob(closePort = true, limits = limits) { it.write("JOB".toByteArray(), 1_000) }
+    }
+    session.open("AA:BB", 1_000, resetAfterFailure = true)
+    assertEquals(3, transports.size)
+
+    session.open("AA:BB", 1_000, resetAfterFailure = true)
+
+    assertEquals(4, transports.size) // only the new connection, no second reset
+  }
+
+  @Test
+  fun open_whenTheConnectionFailsThrowsNotConnected() {
+    val session = session { it.failConnect = true }
+
+    val error = assertFailsWith<PrinterException> {
+      session.open("AA:BB", 1_000, resetAfterFailure = false)
+    }
+
+    assertEquals(PrinterErrorCode.NOT_CONNECTED, error.code)
+    assertTrue(transports.single().closed)
+  }
+
+  @Test
+  fun cancel_whenNothingIsRunningDoesNotCloseTheIdleConnection() {
+    val session = session()
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+
+    session.cancel()
+
+    session.runJob(closePort = false, limits = limits) { it.write("JOB".toByteArray(), 1_000) }
+    assertFalse(transports.single().closed)
+    assertContentEquals("JOB".toByteArray(), transports.single().written.toByteArray())
+  }
+
+  @Test
+  fun cancel_duringAJobEndsItWithCancelledAndTheNextJobRuns() {
+    val session = session { it.blockWrites = true }
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+    val started = CountDownLatch(1)
+    val failure = AtomicReference<Throwable?>()
+    val worker = thread {
+      try {
+        session.runJob(closePort = false, limits = limits) {
+          started.countDown()
+          it.write("JOB".toByteArray(), 5_000)
+        }
+      } catch (e: Throwable) {
+        failure.set(e)
+      }
+    }
+    assertTrue(started.await(2, TimeUnit.SECONDS))
+
+    session.cancel()
+    worker.join(3_000)
+
+    assertEquals(PrinterErrorCode.CANCELLED, (failure.get() as PrinterException).code)
+    assertTrue(transports[0].closed)
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+    assertEquals(2, transports.size)
+  }
+
+  @Test
+  fun cancel_whileThePrinterSettlesAfterAResetEndsOpenWithCancelled() {
+    lateinit var session: PrinterSession
+    var sleeps = 0
+    session = session(sleeper = {
+      sleeps++
+      if (sleeps == 1) session.cancel()
+    })
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+    assertFailsWith<PrinterException> {
+      session.runJob(closePort = true, limits = limits) { it.write("JOB".toByteArray(), 1_000) }
+    }
+    val before = transports.size
+
+    val error = assertFailsWith<PrinterException> {
+      session.open("AA:BB", 1_000, resetAfterFailure = true)
+    }
+
+    assertEquals(PrinterErrorCode.CANCELLED, error.code)
+    assertEquals(1, sleeps) // the wait ended at once
+    assertEquals(before + 1, transports.size) // the reset link only, no new connection
+  }
+
+  @Test
+  fun closePort_closesTheConnection() {
+    val session = session()
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+
+    assertEquals("Success", session.closePort())
+
+    assertTrue(transports.single().closed)
+  }
+
+  /** In-memory transport whose blocking calls end only when it is closed, like a socket. */
+  private class FakeTransport : PrinterTransport {
+    @Volatile var closed = false
+    @Volatile var failConnect = false
+    @Volatile var blockWrites = false
+
+    /** Answers the completion request the way a TSPL printer does. */
+    @Volatile var autoReply = false
+    val written = ByteArrayOutputStream()
+    private val incoming = ConcurrentLinkedQueue<Byte>()
+    private val closedLatch = CountDownLatch(1)
+
+    override fun connect() {
+      if (failConnect) throw IOException("refused")
+    }
+
+    override val input: InputStream = object : InputStream() {
+      override fun available(): Int {
+        if (closed) throw IOException("socket closed")
+        return incoming.size
+      }
+
+      override fun read(): Int = incoming.poll()?.toInt()?.and(0xFF) ?: -1
+    }
+
+    override val output: OutputStream = object : OutputStream() {
+      override fun write(b: Int) {
+        if (closed) throw IOException("socket closed")
+        if (blockWrites) {
+          closedLatch.await(10, TimeUnit.SECONDS)
+          throw IOException("socket closed")
+        }
+        written.write(b)
+        if (autoReply && String(written.toByteArray(), Charsets.US_ASCII).endsWith("OUT \"ENDLINE\"\r\n")) {
+          "COMPLETED\r\nENDLINE\r\n".toByteArray().forEach { incoming.add(it) }
+        }
+      }
+    }
+
+    override fun close() {
+      closed = true
+      closedLatch.countDown()
+    }
+  }
+}
