@@ -68,33 +68,143 @@ class PrinterFlutter {
     return PrinterFlutterPlatform.instance.requestPermissions();
   }
 
-  Future<String?> openPort(String macAddress,
-      {String pin = "0000", String? fallbackPin = "1234"}) {
-    return PrinterFlutterPlatform.instance
-        .openPort(macAddress, pin: pin, fallbackPin: fallbackPin);
+  /// Opens the Bluetooth connection to the printer at [macAddress].
+  ///
+  /// Gives up after [connectTimeout] and throws a [PrinterException] of type
+  /// [PrinterErrorType.notConnected]. With [resetPrinterAfterFailure], when the
+  /// previous job hung, was cancelled or failed, the printer is first reset with
+  /// `<ESC>!R` (only for printers that support it).
+  Future<String?> openPort(
+    String macAddress, {
+    String pin = "0000",
+    String? fallbackPin = "1234",
+    Duration connectTimeout = PrinterLimits.connectTimeout,
+    bool resetPrinterAfterFailure = false,
+  }) {
+    return PrinterFlutterPlatform.instance.openPort(
+      macAddress,
+      pin: pin,
+      fallbackPin: fallbackPin,
+      connectTimeout: connectTimeout,
+      resetPrinterAfterFailure: resetPrinterAfterFailure,
+    );
   }
 
-  Future<String?> sendTspl(String command, {bool closePort = false}) {
-    return PrinterFlutterPlatform.instance
-        .sendTspl(command, closePort: closePort);
+  /// Sends a TSPL [command]. With [closePort], waits up to [completionTimeout]
+  /// for the printer to confirm it processed everything, then closes the port.
+  Future<String?> sendTspl(
+    String command, {
+    bool closePort = false,
+    Duration writeTimeout = PrinterLimits.writeTimeout,
+    Duration completionTimeout = PrinterLimits.completionTimeout,
+  }) {
+    return PrinterFlutterPlatform.instance.sendTspl(
+      command,
+      closePort: closePort,
+      writeTimeout: writeTimeout,
+      completionTimeout: completionTimeout,
+    );
   }
 
-  Future<String?> sendRawBytes(Uint8List bytes, {bool closePort = false}) {
-    return PrinterFlutterPlatform.instance
-        .sendRawBytes(bytes, closePort: closePort);
+  /// Sends raw [bytes]. With [closePort], waits up to [completionTimeout] for
+  /// the printer to confirm it processed everything, then closes the port.
+  Future<String?> sendRawBytes(
+    Uint8List bytes, {
+    bool closePort = false,
+    Duration writeTimeout = PrinterLimits.writeTimeout,
+    Duration completionTimeout = PrinterLimits.completionTimeout,
+  }) {
+    return PrinterFlutterPlatform.instance.sendRawBytes(
+      bytes,
+      closePort: closePort,
+      writeTimeout: writeTimeout,
+      completionTimeout: completionTimeout,
+    );
   }
 
   Future<String?> closePort() {
     return PrinterFlutterPlatform.instance.closePort();
   }
 
+  /// Aborts the job in progress: its call ends with a [PrinterException] of type
+  /// [PrinterErrorType.cancelled] and the next job runs on a new connection.
+  /// Does nothing when no job is running.
+  Future<void> cancel() {
+    return PrinterFlutterPlatform.instance.cancel();
+  }
+
+  /// Prints the PDF at [filePath].
+  ///
+  /// Each chunk sent must be accepted within [writeTimeout]. With [closePort],
+  /// the printer must confirm it printed everything within [completionTimeout],
+  /// counted from the last byte sent; the confirmation arrives after all
+  /// [copies] are physically printed. Failures throw a [PrinterException].
   Future<String?> printPdf({
     required String filePath,
     PdfPrintOptions options = const PdfPrintOptions(),
     int copies = 1,
     bool closePort = false,
+    Duration writeTimeout = PrinterLimits.writeTimeout,
+    Duration completionTimeout = PrinterLimits.completionTimeout,
   }) {
-    return PrinterFlutterPlatform.instance
-        .printPdf(filePath, options, copies: copies, closePort: closePort);
+    return PrinterFlutterPlatform.instance.printPdf(
+      filePath,
+      options,
+      copies: copies,
+      closePort: closePort,
+      writeTimeout: writeTimeout,
+      completionTimeout: completionTimeout,
+    );
   }
+}
+
+/// Default limits of the printer calls.
+abstract final class PrinterLimits {
+  /// How long opening the Bluetooth connection may take.
+  static const Duration connectTimeout = Duration(seconds: 15);
+
+  /// How long the printer may take to accept each chunk of data.
+  static const Duration writeTimeout = Duration(seconds: 20);
+
+  /// How long the printer may take to confirm a job, counted from the last
+  /// byte sent. It includes the physical printing of every copy.
+  static const Duration completionTimeout = Duration(seconds: 60);
+}
+
+/// Why a printer call failed.
+enum PrinterErrorType {
+  /// The connection to the printer could not be opened, or none was open.
+  notConnected,
+
+  /// The connection was lost while sending or waiting.
+  connectionLost,
+
+  /// The printer did not answer within the limit.
+  timeout,
+
+  /// The job was cancelled with [PrinterFlutter.cancel].
+  cancelled,
+
+  /// Any other native error.
+  unknown,
+}
+
+/// Error thrown by the printer calls.
+class PrinterException implements Exception {
+  const PrinterException(this.type, [this.message]);
+
+  final PrinterErrorType type;
+  final String? message;
+
+  /// Native error codes, as sent by the Android plugin.
+  static PrinterErrorType typeFromCode(String code) => switch (code) {
+        'NOT_CONNECTED' => PrinterErrorType.notConnected,
+        'CONNECTION_LOST' => PrinterErrorType.connectionLost,
+        'TIMEOUT' => PrinterErrorType.timeout,
+        'CANCELLED' => PrinterErrorType.cancelled,
+        _ => PrinterErrorType.unknown,
+      };
+
+  @override
+  String toString() => 'PrinterException(${type.name}): ${message ?? ''}';
 }

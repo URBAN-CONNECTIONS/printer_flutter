@@ -42,29 +42,50 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
 
   /// Opens a Bluetooth connection to the printer using its MAC address.
   /// The [pin] and [fallbackPin] are used for automatic Bluetooth pairing on Android.
-  Future<String?> openPort(String macAddress,
-      {String pin = "0000", String? fallbackPin = "1234"}) {
+  Future<String?> openPort(
+    String macAddress, {
+    String pin = "0000",
+    String? fallbackPin = "1234",
+    Duration connectTimeout = PrinterLimits.connectTimeout,
+    bool resetPrinterAfterFailure = false,
+  }) {
     throw UnimplementedError('openPort() has not been implemented.');
   }
 
-  /// Sends a TSPL command string to the connected printer.
-  Future<String?> sendTspl(String command, {bool closePort = false}) {
+  Future<String?> sendTspl(
+    String command, {
+    bool closePort = false,
+    Duration writeTimeout = PrinterLimits.writeTimeout,
+    Duration completionTimeout = PrinterLimits.completionTimeout,
+  }) {
     throw UnimplementedError('sendTspl() has not been implemented.');
   }
 
-  /// Sends raw bytes to the connected printer.
-  Future<String?> sendRawBytes(Uint8List bytes, {bool closePort = false}) {
+  Future<String?> sendRawBytes(
+    Uint8List bytes, {
+    bool closePort = false,
+    Duration writeTimeout = PrinterLimits.writeTimeout,
+    Duration completionTimeout = PrinterLimits.completionTimeout,
+  }) {
     throw UnimplementedError('sendRawBytes() has not been implemented.');
   }
 
-  /// Closes the active Bluetooth connection.
   Future<String?> closePort() {
     throw UnimplementedError('closePort() has not been implemented.');
   }
 
-  /// Renders and prints a PDF file using the specified configuration.
-  Future<String?> printPdf(String filePath, PdfPrintOptions options,
-      {int copies = 1, bool closePort = false}) {
+  Future<void> cancel() {
+    throw UnimplementedError('cancel() has not been implemented.');
+  }
+
+  Future<String?> printPdf(
+    String filePath,
+    PdfPrintOptions options, {
+    int copies = 1,
+    bool closePort = false,
+    Duration writeTimeout = PrinterLimits.writeTimeout,
+    Duration completionTimeout = PrinterLimits.completionTimeout,
+  }) {
     throw UnimplementedError('printPdf() has not been implemented.');
   }
 }
