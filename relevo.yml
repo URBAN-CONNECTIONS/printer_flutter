@@ -1,0 +1,85 @@
+# relevo.yml: one per repository. /relevo:init creates and updates this file.
+# Validate it with: node scripts/validate-config.mjs relevo.yml
+# Never put API keys or tokens here; they belong in the repository secret store.
+
+branches:
+  base: dev            # integration branch: feature pull requests target it
+  release: main        # promoted from base in a separate pull request
+
+tracker: github        # github (more later)
+git_provider: github   # github (more later)
+platforms:
+  app:
+    stack: flutter
+    path: .
+    targets: [android]
+
+links: []              # repositories an issue may depend on (Depends-on: owner/repo#N) or point to (owner/repo:path); private ones need the secret RELEVO_LINKS_TOKEN, read-only on issues, pull requests and contents
+
+team:
+  members: [elalfner]          # GitHub usernames of the people who build and review
+  spec_writer: elalfner    # writes the specs; never reviews or merges
+  approvers: []        # only used when review.mode is "roles"
+
+review:
+  mode: none           # none (solo) | peer | roles
+  merger: approver     # author | approver: who runs /relevo:ship
+  autopilot: off       # off | precheck | verify: how much of the on-device review the agent may drive (the person always closes it)
+  allowed_origins: []  # web origins a driven review may visit besides localhost, e.g. https://staging.example.com
+  ship_without_ci: false  # true: the relevo:ship label may merge when no check ran (/relevo:ship asks instead)
+
+limits:
+  built_unreviewed_per_person: 2   # built issues one person may have waiting
+  concurrent_agents: 3             # unattended runs at the same time
+  review_sla_hours: 8              # reminder, then escalation after the same time again
+  run_max_turns: 100               # per unattended run: the runner limits the main agent and Relevo limits the subagents together
+  run_max_minutes: 50              # minutes after which an unattended run starts no further agent; keep it 5+ below the timeout-minutes of the go workflow (60)
+  building_alert_hours: 3          # hours without activity before an issue on `building` is reported as stuck
+  run_max_cost: 5                  # REQUIRED: US dollars per unattended run; choose your own
+
+# restricted_paths: [infra/prod.tfvars]   # files no agent or script of Relevo reads, added to the built-in list (.env files, private keys, credential files, secrets/); it only adds, never removes (docs/security.md)
+
+# runner:                            # where the Relevo workflows run; leave it out for GitHub-hosted (ubuntu-latest)
+#   labels: [self-hosted, linux-build]     # a self-hosted runner is assumed to persist between jobs (docs/execution.md)
+#   build_labels: [self-hosted, relevo-build]   # optional: only the build job of go runs on these; every other job stays on labels
+
+qa:
+  retries: 1                       # developer attempts after QA rejects
+  rules_from: CLAUDE.md            # project rules QA reads at every run
+
+# The model and the effort of the developer agent and of each QA reviewer (lens). The values below are the defaults.
+# Two reviewers use the stronger model by default; set `spec` and `security` to `sonnet` to keep the cost QA had before.
+# With agent.build antigravity these are accepted and not applied (doctor and init say so). No key turns a reviewer off.
+# agents:
+#   ladder: [haiku, sonnet, opus]   # the order of the models, lowest to highest; floor and ceiling are names in it
+#   dev:
+#     model: sonnet                 # or `auto`: a script picks the model per issue between floor and ceiling (docs/configuration.md)
+#     effort: high
+#   qa:
+#     spec:      { model: opus,   effort: high }
+#     security:  { model: opus,   effort: high }
+#     code:      { model: sonnet, effort: high }
+#     interface: { model: sonnet, effort: medium }
+
+evidence:
+  policy: attach_to_pr             # attach_to_pr | local_only (use for sensitive data)
+
+digest:
+  issue: null                     # number of the issue where the daily digest is posted as a comment; subscribe your chat tool to it
+
+design:
+  images: false        # true: a picture pasted into an issue is downloaded and shown to the model (it may hold customer data); files in the repository are always available
+  # system:                        # where the design system lives; the interface step of `think` reads only these paths
+  #   tokens: []                   # files or folders with the colours, spacing and type styles (a theme file, a CSS file of variables)
+  #   components: []               # folders with the reusable components that a new screen should use
+  #   references: []               # folders with screenshots or sketches to look at, inside the repository
+
+language: en                       # language of hand-off messages (en, es)
+trust: private-team                # private-team | public
+
+# Rename any label here; keys are fixed, names are yours.
+# labels:
+#   ready: relevo:ready             # the approval: the text is what should be built; starts nothing
+#   go: relevo:go                   # the build request: the cloud builds a ready issue
+#   local: relevo:local             # marks a build on a machine, next to building
+#   built: relevo:built
