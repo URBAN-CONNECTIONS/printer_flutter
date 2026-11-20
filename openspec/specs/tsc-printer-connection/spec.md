@@ -1,29 +1,28 @@
 # tsc-printer-connection
 
+## Purpose
+Open a Bluetooth Classic SPP connection to a TSC-compatible thermal printer from the Android plugin, send it TSPL commands and close the port.
+
 ## Requirements
 
-### Requirement: Android Library Integration
-The Android platform implementation SHALL compile and package `tscsdk.jar` from `android/libs/tscsdk.jar`.
-
-#### Scenario: Gradle dependency resolution
-- **GIVEN** `tscsdk.jar` is placed in `android/libs/`
-- **WHEN** the Android library project is compiled via Gradle
-- **THEN** classes under `com.example.tscdll` SHALL be available on the compilation classpath.
-
 ### Requirement: Native TSC Connection and Command Execution
-The Android native plugin SHALL expose MethodChannel endpoints to open connections, transmit TSPL commands, and close ports using `TSCActivity`, `TSCUSBActivity`, and `TscWifiActivity`.
+The Android native plugin SHALL expose MethodChannel endpoints to open a Bluetooth Classic SPP connection to a printer, transmit TSPL commands and close the port, without the TSC SDK.
 
 #### Scenario: Opening Bluetooth printer port with PIN configuration
 - **GIVEN** a valid Bluetooth MAC address and optional `pin` and `fallbackPin` arguments
 - **WHEN** Flutter invokes `openPort` with the MAC address over `MethodChannel`
-- **THEN** the native Android plugin SHALL update the target MAC address and active PIN configuration, delegate to `TSCActivity.openport`, and return the connection status result.
+- **THEN** the native Android plugin SHALL update the target MAC address and active PIN configuration, open an SPP socket to the device and return success
+
+#### Scenario: Opening fails
+- **WHEN** the connection cannot be opened within the connect limit
+- **THEN** `openPort` SHALL fail with a `notConnected` error instead of returning a status string
 
 #### Scenario: Transmitting TSPL printing commands
-- **GIVEN** an active connection to a TSC printer
+- **GIVEN** an active connection to a printer
 - **WHEN** Flutter invokes `sendTspl` with a string command over `MethodChannel`
-- **THEN** the native Android plugin SHALL execute `TSCActivity.sendcommand` to transmit data to the hardware printer.
+- **THEN** the native Android plugin SHALL write the command to the printer
 
 #### Scenario: Closing printer port
 - **GIVEN** an open printer port
 - **WHEN** Flutter invokes `closePort` over `MethodChannel`
-- **THEN** the native Android plugin SHALL invoke `TSCActivity.closeport` to release hardware socket resources.
+- **THEN** the native Android plugin SHALL close the socket and release its resources
