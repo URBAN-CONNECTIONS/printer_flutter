@@ -47,6 +47,7 @@ Flutter            Plugin (main)        Job thread                 Watchdog     
 - [The 60 s default may be short for long tickets] → it is configurable per call; apps should set it to twice the worst case measured on their printer.
 - [A late answer after a timeout] → the app sees an error and a retry may print a duplicate; accepted by the apps over a phone that cannot print.
 - [`<ESC>!R` unsupported on some TSPL clones] → off by default.
+- [A printer left halfway through an image stops accepting connections] → seen on a Ribetec with a cancelled print: it shows `Downloading...` and refuses Bluetooth until it is turned off and on, whatever the phone does (checked: disconnect, closing the app, Bluetooth off and on, restarting the phone). The plugin cannot recover it; it reports `notConnected` and documents the need to restart the printer. `<ESC>!R` cannot reach it either.
 
 ## Documentation from the issue
 

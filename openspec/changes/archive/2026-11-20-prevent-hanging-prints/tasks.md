@@ -27,7 +27,7 @@
 
 ## 5. Device verification (manual)
 
-- [ ] 5.1 On a Ribetec printer, measure the longest ticket with 2 copies and confirm the 60 s default
+- [ ] 5.1 On a Ribetec printer, measure the longest ticket with 2 copies and confirm the 60 s default (first measure: a 72 x 240 mm ticket with 2 copies confirmed in 18.1 s; the longest ticket is still to measure)
 - [ ] 5.2 Turn the printer off mid-print: error within the limit, next print works without restarting the phone
-- [ ] 5.3 Remove the paper mid-print and cancel mid-print
+- [x] 5.3 Cancel mid-print: ends with `cancelled`. Cancelling after the paper started to come out lets the printer finish and a new `openPort` works; cancelling before, the printer stays on `Downloading...` and refuses connections until it is turned off and on. Removing the paper mid-print is still to try (a jam gave no error: the printer still answered)
 - [ ] 5.4 Check whether the Ribetec answers `<ESC>!R` and `<ESC>!?`
