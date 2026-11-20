@@ -66,6 +66,7 @@ class _TestPageState extends State<TestPage> {
     '4. Quitar el papel a mitad de impresión',
     '5. Reiniciar la impresora (<ESC>!R)',
     '6. Cancelar después de imprimir',
+    '7. Cancelar a mitad y reconectar con reinicio (<ESC>!R)',
   ];
   final List<_TestResult> _results =
       List.generate(_tests.length, (_) => _TestResult());
@@ -128,14 +129,15 @@ class _TestPageState extends State<TestPage> {
     }
   }
 
-  Future<_Outcome> _connect() => _try(
-        'Conectar',
+  Future<_Outcome> _connect({bool reset = false}) => _try(
+        reset ? 'Conectar con reinicio' : 'Conectar',
         () => _plugin.openPort(
           _macController.text.trim(),
           pin: _pinController.text.trim(),
           fallbackPin: _fallbackPinController.text.trim().isEmpty
               ? null
               : _fallbackPinController.text.trim(),
+          resetPrinterAfterFailure: reset,
         ),
       );
 
@@ -160,8 +162,8 @@ class _TestPageState extends State<TestPage> {
       });
 
   /// Connects and prints once: the check that the printer works again.
-  Future<String> _recover() async {
-    final connect = await _connect();
+  Future<String> _recover({bool reset = false}) async {
+    final connect = await _connect(reset: reset);
     if (!connect.ok) return 'no conectó (${connect.text})';
     final print = await _print(1);
     if (!print.ok) return 'conectó pero no imprimió (${print.text})';
@@ -333,6 +335,34 @@ class _TestPageState extends State<TestPage> {
         );
       });
 
+  // 7. Like 2, but the reconnect asks the plugin to reset the printer first.
+  Future<void> _test7() => _runTest(6, () async {
+        final connect = await _connect();
+        if (!connect.ok) return (false, 'no conectó: ${connect.text}');
+        await _ask(
+          'Se va a imprimir y a los 4 segundos se cancelará solo. '
+          'Luego se reconectará pidiendo el reinicio de la impresora.',
+          yes: 'Empezar',
+        );
+        final printing = _print(2);
+        await Future<void>.delayed(const Duration(seconds: 4));
+        _log('cancel()');
+        await _plugin.cancel();
+        final outcome = await printing;
+        final cancelled = outcome.type == PrinterErrorType.cancelled;
+        final recovery = await _recover(reset: true);
+        final ready = await _ask(
+          '¿Qué dice ahora la pantalla de la impresora?',
+          yes: 'Ready (normal)',
+          no: 'Downloading... (trabada)',
+        );
+        return (
+          cancelled && recovery == 'conectó e imprimió',
+          'cancelar: ${outcome.text}; reconectar con reinicio: $recovery; '
+              'pantalla: ${ready ? 'Ready' : 'Downloading...'}'
+        );
+      });
+
   String _summary() {
     final buffer = StringBuffer()
       ..writeln('Impresora: ${_modelController.text.trim()}')
@@ -481,6 +511,8 @@ class _TestPageState extends State<TestPage> {
               'Con la impresora sana, le manda el reinicio y ve si reacciona.'),
           _testCard(5, _test6,
               'Imprime, cancela sin nada en curso y vuelve a imprimir.'),
+          _testCard(6, _test7,
+              'Como la 2, pero al reconectar le pide al plugin reiniciar la impresora primero.'),
           const SizedBox(height: 8),
           FilledButton.icon(
             onPressed: _copy,
