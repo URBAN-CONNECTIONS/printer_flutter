@@ -161,6 +161,12 @@ try {
 
 `cancel()` aborts the job in progress. `openPort(mac, resetPrinterAfterFailure: true)` resets the printer with `<ESC>!R` before connecting when the previous job failed; enable it only for printers that support that command.
 
+### A printer left halfway through an image
+
+If the connection is cut (or `cancel()` is called) while the plugin is still sending an image, some printers keep waiting for the bytes that never arrive. On a Ribetec this shows as `Downloading...` on its screen, and it stops accepting Bluetooth connections: every `openPort` fails with `notConnected` until the printer is turned off and on. Restarting the phone, turning its Bluetooth off and on, or closing the app does not help, and `resetPrinterAfterFailure` cannot help either, because it needs a connection to send `<ESC>!R`.
+
+The plugin cannot prevent this, only report it. When `openPort` keeps failing after a cut or cancelled print, ask the user to turn the printer off and on. If `cancel()` arrives after the printer already received the whole image, the printer finishes the print and `openPort` works again at once.
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
