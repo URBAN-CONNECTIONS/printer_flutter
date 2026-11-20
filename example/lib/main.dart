@@ -67,6 +67,7 @@ class _TestPageState extends State<TestPage> {
     '5. Reiniciar la impresora (<ESC>!R)',
     '6. Cancelar después de imprimir',
     '7. Cancelar a mitad y reconectar con reinicio (<ESC>!R)',
+    '8. Cancelar con reinicio antes de cerrar',
   ];
   final List<_TestResult> _results =
       List.generate(_tests.length, (_) => _TestResult());
@@ -363,6 +364,38 @@ class _TestPageState extends State<TestPage> {
         );
       });
 
+  // 8. Cancel asking the plugin to reset the printer before closing the connection.
+  Future<void> _test8() => _runTest(7, () async {
+        final connect = await _connect();
+        if (!connect.ok) return (false, 'no conectó: ${connect.text}');
+        await _ask(
+          'Se va a imprimir y a los 4 segundos se cancelará pidiendo el '
+          'reinicio de la impresora antes de cerrar. Mira su pantalla.',
+          yes: 'Empezar',
+        );
+        final printing = _print(2);
+        await Future<void>.delayed(const Duration(seconds: 4));
+        _log('cancel(resetPrinter: true)');
+        await _plugin.cancel(resetPrinter: true);
+        final outcome = await printing;
+        final cancelled = outcome.type == PrinterErrorType.cancelled;
+        await _ask(
+          'Espera unos segundos a que la impresora termine de reiniciarse y '
+          'toca "Listo".',
+        );
+        final recovery = await _recover();
+        final ready = await _ask(
+          '¿Qué dice ahora la pantalla de la impresora?',
+          yes: 'Ready (normal)',
+          no: 'Downloading... (trabada)',
+        );
+        return (
+          cancelled && recovery == 'conectó e imprimió',
+          'cancelar con reinicio: ${outcome.text}; después: $recovery; '
+              'pantalla: ${ready ? 'Ready' : 'Downloading...'}'
+        );
+      });
+
   String _summary() {
     final buffer = StringBuffer()
       ..writeln('Impresora: ${_modelController.text.trim()}')
@@ -513,6 +546,8 @@ class _TestPageState extends State<TestPage> {
               'Imprime, cancela sin nada en curso y vuelve a imprimir.'),
           _testCard(6, _test7,
               'Como la 2, pero al reconectar le pide al plugin reiniciar la impresora primero.'),
+          _testCard(7, _test8,
+              'Imprime y cancela a los 4 s mandando el reinicio ANTES de cerrar la conexión. Es el que debería evitar el Downloading.'),
           const SizedBox(height: 8),
           FilledButton.icon(
             onPressed: _copy,
