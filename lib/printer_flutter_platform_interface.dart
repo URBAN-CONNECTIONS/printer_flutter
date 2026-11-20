@@ -89,7 +89,10 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
 
   /// Aborts the job in progress; its call ends with a [PrinterException] of type
   /// [PrinterErrorType.cancelled]. Does nothing when no job is running.
-  Future<void> cancel() {
+  ///
+  /// With [resetPrinter], the plugin sends `<ESC>!R` on the open connection before
+  /// closing it, so the printer is not left waiting for the rest of an image.
+  Future<void> cancel({bool resetPrinter = false}) {
     throw UnimplementedError('cancel() has not been implemented.');
   }
 

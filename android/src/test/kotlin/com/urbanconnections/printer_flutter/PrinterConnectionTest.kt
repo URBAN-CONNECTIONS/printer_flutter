@@ -9,10 +9,12 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
@@ -156,6 +158,64 @@ class PrinterConnectionTest {
     val error = assertFailsWith<PrinterException> { connection.open(timeoutMs = 100) }
 
     assertEquals(PrinterErrorCode.NOT_CONNECTED, error.code)
+    assertTrue(transport.closed)
+  }
+
+  @Test
+  fun cancelThenReset_sendsTheResetInsteadOfTheNextChunkAndCancels() {
+    val transport = FakeTransport()
+    val connection = PrinterConnection(transport, watchdog, pollIntervalMs = 5)
+    connection.cancelThenReset("RST".toByteArray())
+
+    val error = assertFailsWith<PrinterException> {
+      connection.write("DATA".toByteArray(), timeoutMs = 1_000)
+    }
+
+    assertEquals(PrinterErrorCode.CANCELLED, error.code)
+    assertContentEquals("RST".toByteArray(), transport.written.toByteArray())
+    assertTrue(connection.resetSent)
+    assertTrue(transport.closed)
+  }
+
+  @Test
+  fun cancelThenReset_endsAWaitForTheMarkerAfterSendingTheReset() {
+    val transport = FakeTransport()
+    val connection = PrinterConnection(transport, watchdog, pollIntervalMs = 5)
+    thread {
+      Thread.sleep(50)
+      connection.cancelThenReset("RST".toByteArray())
+    }
+
+    val error = assertFailsWith<PrinterException> {
+      connection.awaitMarker("ENDLINE", timeoutMs = 2_000)
+    }
+
+    assertEquals(PrinterErrorCode.CANCELLED, error.code)
+    assertContentEquals("RST".toByteArray(), transport.written.toByteArray())
+    assertTrue(connection.resetSent)
+  }
+
+  @Test
+  fun cancelThenReset_closesWithoutTheResetWhenAWriteIsBlocked() {
+    val transport = FakeTransport()
+    transport.blockWrites = true
+    val connection = PrinterConnection(transport, watchdog, pollIntervalMs = 5)
+    val failure = AtomicReference<Throwable?>()
+    val worker = thread {
+      try {
+        connection.write("DATA".toByteArray(), timeoutMs = 5_000)
+      } catch (e: Throwable) {
+        failure.set(e)
+      }
+    }
+    Thread.sleep(50)
+
+    connection.cancelThenReset("RST".toByteArray(), hardStopMs = 100)
+    worker.join(3_000)
+
+    assertEquals(PrinterErrorCode.CANCELLED, (failure.get() as PrinterException).code)
+    assertEquals(0, transport.written.size())
+    assertTrue(!connection.resetSent)
     assertTrue(transport.closed)
   }
 

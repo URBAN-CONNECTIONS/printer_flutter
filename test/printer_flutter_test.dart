@@ -49,7 +49,7 @@ class MockPrinterFlutterPlatform
   Future<String?> closePort() => Future.value('Success');
 
   @override
-  Future<void> cancel() => Future.value();
+  Future<void> cancel({bool resetPrinter = false}) => Future.value();
 
   @override
   Future<String?> printPdf(

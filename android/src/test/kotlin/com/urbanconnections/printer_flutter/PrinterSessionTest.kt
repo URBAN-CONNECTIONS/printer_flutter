@@ -245,6 +245,46 @@ class PrinterSessionTest {
   }
 
   @Test
+  fun cancel_withResetDuringAJobSendsTheResetFirstAndTheNextOpenWaitsWithoutResettingAgain() {
+    val sleeps = mutableListOf<Long>()
+    val session = session(sleeper = { sleeps.add(it) })
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+    val started = CountDownLatch(1)
+    val failure = AtomicReference<Throwable?>()
+    val worker = thread {
+      try {
+        session.runJob(closePort = false, limits = limits) { connection ->
+          started.countDown()
+          while (true) {
+            connection.write(ByteArray(1024) { 1 }, 2_000)
+            Thread.sleep(1)
+          }
+        }
+      } catch (e: Throwable) {
+        failure.set(e)
+      }
+    }
+    assertTrue(started.await(2, TimeUnit.SECONDS))
+
+    session.cancel(resetPrinter = true)
+    worker.join(3_000)
+
+    assertEquals(PrinterErrorCode.CANCELLED, (failure.get() as PrinterException).code)
+    val written = transports[0].written.toByteArray()
+    assertContentEquals(
+      PrinterSession.RESET_COMMAND,
+      written.copyOfRange(written.size - PrinterSession.RESET_COMMAND.size, written.size),
+    )
+    assertTrue(transports[0].closed)
+
+    session.open("AA:BB", 1_000, resetAfterFailure = true)
+
+    assertEquals(2, transports.size) // the job and the new connection: no second reset link
+    assertEquals(0, transports[1].written.size())
+    assertEquals(300L, sleeps.sum()) // it waited for the printer to restart
+  }
+
+  @Test
   fun closePort_closesTheConnection() {
     val session = session()
     session.open("AA:BB", 1_000, resetAfterFailure = false)

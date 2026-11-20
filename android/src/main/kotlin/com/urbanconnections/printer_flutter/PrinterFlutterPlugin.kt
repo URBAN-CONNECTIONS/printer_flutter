@@ -169,7 +169,7 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
       }
       "cancel" -> {
         // Runs on the main thread, not on the executor: it must reach a job in progress.
-        session.cancel()
+        session.cancel(call.argument<Boolean>("resetPrinter") ?: false)
         result.success("Success")
       }
       "printPdf" -> {
