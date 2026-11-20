@@ -6,6 +6,7 @@
 * Added `cancel()` to abort the job in progress.
 * Added opt-in `resetPrinterAfterFailure` to `openPort`: resets the printer with `<ESC>!R` after a failed job.
 * The wait for the completion marker now finds it when it arrives split across reads.
+* Added `cancel(resetPrinter: true)`: stops sending, sends `<ESC>!R` on the open connection and then closes it, so the printer is not left waiting for the rest of an image. Off by default.
 
 ## 0.0.11
 

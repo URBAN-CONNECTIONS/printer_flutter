@@ -81,7 +81,8 @@ class MethodChannelPrinterFlutter extends PrinterFlutterPlatform {
   Future<String?> closePort() => _invoke<String>('closePort');
 
   @override
-  Future<void> cancel() => _invoke<String>('cancel');
+  Future<void> cancel({bool resetPrinter = false}) =>
+      _invoke<String>('cancel', {'resetPrinter': resetPrinter});
 
   @override
   Future<String?> printPdf(

@@ -159,13 +159,13 @@ try {
 }
 ```
 
-`cancel()` aborts the job in progress. `openPort(mac, resetPrinterAfterFailure: true)` resets the printer with `<ESC>!R` before connecting when the previous job failed; enable it only for printers that support that command.
+`cancel()` aborts the job in progress. `cancel(resetPrinter: true)` first stops sending at the next chunk and sends `<ESC>!R` on the connection that is still open, then closes it, so the printer is not left waiting for the rest of an image (see below). The reset deletes what was downloaded to the printer, so it is off by default; if the job cannot stop within 5 s the connection is closed without it. The next `openPort` waits for the printer to restart. `openPort(mac, resetPrinterAfterFailure: true)` resets the printer with `<ESC>!R` before connecting when the previous job failed; enable it only for printers that support that command.
 
 ### A printer left halfway through an image
 
 If the connection is cut (or `cancel()` is called) while the plugin is still sending an image, some printers keep waiting for the bytes that never arrive. On a Ribetec this shows as `Downloading...` on its screen, and it stops accepting Bluetooth connections: every `openPort` fails with `notConnected` until the printer is turned off and on. Restarting the phone, turning its Bluetooth off and on, or closing the app does not help, and `resetPrinterAfterFailure` cannot help either, because it needs a connection to send `<ESC>!R`.
 
-The plugin cannot prevent this, only report it. When `openPort` keeps failing after a cut or cancelled print, ask the user to turn the printer off and on. If `cancel()` arrives after the printer already received the whole image, the printer finishes the print and `openPort` works again at once.
+`cancel(resetPrinter: true)` avoids it when the printer processes `<ESC>!R` while it waits for data; check it on your printer first. A connection lost by itself (range, battery) cannot be helped: there is no open connection to send the reset through. When `openPort` keeps failing after a cut or cancelled print, ask the user to turn the printer off and on. If `cancel()` arrives after the printer already received the whole image, the printer finishes the print and `openPort` works again at once.
 
 ## License
 

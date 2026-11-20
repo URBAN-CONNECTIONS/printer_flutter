@@ -56,9 +56,15 @@ class PrinterConnection(
   @Volatile private var closed = false
   @Volatile private var cancelled = false
   @Volatile private var timedOut = false
+  @Volatile private var pendingReset: ByteArray? = null
+  @Volatile private var resetWasSent = false
 
   val isOpen: Boolean
     get() = !closed
+
+  /** true when a cancel with reset wrote the reset command before closing. */
+  val resetSent: Boolean
+    get() = resetWasSent
 
   /** Opens the link within [timeoutMs]. Any failure other than a cancel is [PrinterErrorCode.NOT_CONNECTED]. */
   fun open(timeoutMs: Long) {
@@ -143,6 +149,26 @@ class PrinterConnection(
     close()
   }
 
+  /**
+   * Cancels the job like [cancel], but first sends [reset] on the open connection.
+   *
+   * The job thread stops at its next chunk or its next poll of the marker, writes [reset]
+   * (bounded by [RESET_WRITE_TIMEOUT_MS]), closes the connection and ends with
+   * [PrinterErrorCode.CANCELLED]. All writes stay on the job thread, so the reset never
+   * interleaves with a chunk. If the job does not reach a stop point within [hardStopMs]
+   * (a write blocked on a printer that does not read), the connection is closed without it.
+   */
+  fun cancelThenReset(reset: ByteArray, hardStopMs: Long = DEFAULT_HARD_STOP_MS) {
+    if (closed) return
+    pendingReset = reset
+    watchdog.schedule({
+      if (!closed) {
+        cancelled = true
+        close()
+      }
+    }, hardStopMs, TimeUnit.MILLISECONDS)
+  }
+
   fun close() {
     if (closed) return
     closed = true
@@ -152,7 +178,28 @@ class PrinterConnection(
     }
   }
 
+  /** Runs the cancel with reset asked by [cancelThenReset], from the job thread. */
+  private fun abortIfRequested() {
+    val reset = pendingReset ?: return
+    pendingReset = null
+    cancelled = true
+    if (!closed) {
+      val timer = watchdog.schedule({ close() }, RESET_WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+      try {
+        transport.output.write(reset)
+        transport.output.flush()
+        resetWasSent = true
+      } catch (_: Exception) {
+      } finally {
+        timer.cancel(false)
+      }
+    }
+    close()
+    throw PrinterException(PrinterErrorCode.CANCELLED, "La impresión se canceló")
+  }
+
   private fun checkUsable() {
+    abortIfRequested()
     if (cancelled) throw PrinterException(PrinterErrorCode.CANCELLED, "La impresión se canceló")
     if (timedOut) throw PrinterException(PrinterErrorCode.TIMEOUT, "La impresora no contestó a tiempo")
     if (closed) throw PrinterException(PrinterErrorCode.CONNECTION_LOST, "La conexión con la impresora está cerrada")
@@ -193,6 +240,8 @@ class PrinterConnection(
 
   companion object {
     const val DEFAULT_POLL_INTERVAL_MS = 50L
+    const val DEFAULT_HARD_STOP_MS = 5_000L
+    const val RESET_WRITE_TIMEOUT_MS = 2_000L
     const val WRITE_CHUNK_SIZE = 4096
     const val READ_BUFFER_SIZE = 256
 

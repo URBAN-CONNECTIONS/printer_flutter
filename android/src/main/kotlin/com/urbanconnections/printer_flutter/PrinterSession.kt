@@ -30,6 +30,9 @@ class PrinterSession(
   /** true when [cancel] arrived during the running call, even before it had a connection. */
   @Volatile private var cancelRequested = false
 
+  /** true when a cancel already reset the printer: the next open waits for it and does not reset again. */
+  @Volatile private var printerResetByCancel = false
+
   /**
    * Opens the connection within [connectTimeoutMs]. With [resetAfterFailure], when the previous
    * job failed, the printer is first reset with `<ESC>!R` and given time to come back.
@@ -37,8 +40,14 @@ class PrinterSession(
   fun open(macAddress: String, connectTimeoutMs: Long, resetAfterFailure: Boolean): String = exclusive {
     // Always close any existing connection before opening a new one.
     closeConnection()
+    val alreadyReset = printerResetByCancel
+    printerResetByCancel = false
     try {
-      if (resetAfterFailure && lastJobFailed) resetPrinter(macAddress, connectTimeoutMs)
+      if (alreadyReset) {
+        settle()
+      } else if (resetAfterFailure && lastJobFailed) {
+        resetPrinter(macAddress, connectTimeoutMs)
+      }
       throwIfCancelRequested()
       val opened = newConnection(macAddress)
       connection = opened
@@ -79,6 +88,7 @@ class PrinterSession(
       "Success"
     } catch (e: Throwable) {
       lastJobFailed = true
+      if (current.resetSent) printerResetByCancel = true
       closeConnection()
       throw e
     }
@@ -96,10 +106,11 @@ class PrinterSession(
    * Aborts the call in progress: it ends with [PrinterErrorCode.CANCELLED]. Does nothing when no
    * call is running, so a cancel that arrives between two jobs never closes the idle connection.
    */
-  fun cancel() {
+  fun cancel(resetPrinter: Boolean = false) {
     if (!busy) return
     cancelRequested = true
-    connection?.cancel()
+    val current = connection ?: return
+    if (resetPrinter) current.cancelThenReset(RESET_COMMAND) else current.cancel()
   }
 
   /** Called when the plugin detaches: aborts whatever is running. */
@@ -128,6 +139,11 @@ class PrinterSession(
       resetConnection.close()
       connection = null
     }
+    settle()
+  }
+
+  /** Waits for the printer to come back after a reset, in slices so a cancel ends the wait at once. */
+  private fun settle() {
     var waited = 0L
     while (waited < resetSettleMs) {
       throwIfCancelRequested()

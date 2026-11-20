@@ -130,8 +130,15 @@ class PrinterFlutter {
   /// Aborts the job in progress: its call ends with a [PrinterException] of type
   /// [PrinterErrorType.cancelled] and the next job runs on a new connection.
   /// Does nothing when no job is running.
-  Future<void> cancel() {
-    return PrinterFlutterPlatform.instance.cancel();
+  ///
+  /// With [resetPrinter], the plugin stops sending at the next chunk, sends `<ESC>!R`
+  /// on the connection that is still open and then closes it, so a printer that was
+  /// receiving an image is not left waiting for the rest of it. The reset deletes what
+  /// was downloaded to the printer, so it is off by default. If the job cannot stop
+  /// within a few seconds, the connection is closed without the reset. The next
+  /// [openPort] waits for the printer to restart.
+  Future<void> cancel({bool resetPrinter = false}) {
+    return PrinterFlutterPlatform.instance.cancel(resetPrinter: resetPrinter);
   }
 
   /// Prints the PDF at [filePath].

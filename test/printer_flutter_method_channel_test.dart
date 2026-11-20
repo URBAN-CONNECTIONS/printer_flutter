@@ -84,6 +84,12 @@ void main() {
     test('cancel invokes the native cancel', () async {
       await platform.cancel();
       expect(log.single.method, 'cancel');
+      expect(log.single.arguments['resetPrinter'], false);
+    });
+
+    test('cancel sends the printer reset option', () async {
+      await platform.cancel(resetPrinter: true);
+      expect(log.single.arguments['resetPrinter'], true);
     });
   });
 
