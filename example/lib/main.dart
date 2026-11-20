@@ -61,13 +61,13 @@ class _TestPageState extends State<TestPage> {
 
   static const _tests = [
     '1. Imprimir normal (2 copias)',
-    '2. Cancelar a mitad de impresión',
-    '3. Apagar la impresora a mitad de impresión',
+    '2. Cancelar después de imprimir',
+    '3. Reiniciar la impresora (<ESC>!R)',
     '4. Quitar el papel a mitad de impresión',
-    '5. Reiniciar la impresora (<ESC>!R)',
-    '6. Cancelar después de imprimir',
-    '7. Cancelar a mitad y reconectar con reinicio (<ESC>!R)',
-    '8. Cancelar con reinicio antes de cerrar',
+    '5. Cancelar con reinicio antes de cerrar',
+    '6. Cancelar a mitad y reconectar con reinicio',
+    '7. Cancelar a mitad de impresión',
+    '8. Apagar la impresora a mitad de impresión',
   ];
   final List<_TestResult> _results =
       List.generate(_tests.length, (_) => _TestResult());
@@ -245,7 +245,7 @@ class _TestPageState extends State<TestPage> {
       });
 
   // 2. Cancel in the middle of a print, then see if the printer works again.
-  Future<void> _test2() => _runTest(1, () async {
+  Future<void> _test2() => _runTest(6, () async {
         final connect = await _connect();
         if (!connect.ok) return (false, 'no conectó: ${connect.text}');
         await _ask(
@@ -293,13 +293,13 @@ class _TestPageState extends State<TestPage> {
   }
 
   Future<void> _test3() => _runTest(
-      2, () => _printerProblem('apaga la impresora', 'prende la impresora'));
+      7, () => _printerProblem('apaga la impresora', 'prende la impresora'));
 
   Future<void> _test4() => _runTest(
       3, () => _printerProblem('quita el papel', 'pon el papel otra vez'));
 
   // 5. Reset a healthy printer with <ESC>!R.
-  Future<void> _test5() => _runTest(4, () async {
+  Future<void> _test5() => _runTest(2, () async {
         final connect = await _connect();
         if (!connect.ok) return (false, 'no conectó: ${connect.text}');
         final sent = await _try(
@@ -322,7 +322,7 @@ class _TestPageState extends State<TestPage> {
       });
 
   // 6. Cancel when nothing is running.
-  Future<void> _test6() => _runTest(5, () async {
+  Future<void> _test6() => _runTest(1, () async {
         final connect = await _connect();
         if (!connect.ok) return (false, 'no conectó: ${connect.text}');
         final print = await _print(1);
@@ -337,7 +337,7 @@ class _TestPageState extends State<TestPage> {
       });
 
   // 7. Like 2, but the reconnect asks the plugin to reset the printer first.
-  Future<void> _test7() => _runTest(6, () async {
+  Future<void> _test7() => _runTest(5, () async {
         final connect = await _connect();
         if (!connect.ok) return (false, 'no conectó: ${connect.text}');
         await _ask(
@@ -365,7 +365,7 @@ class _TestPageState extends State<TestPage> {
       });
 
   // 8. Cancel asking the plugin to reset the printer before closing the connection.
-  Future<void> _test8() => _runTest(7, () async {
+  Future<void> _test8() => _runTest(4, () async {
         final connect = await _connect();
         if (!connect.ok) return (false, 'no conectó: ${connect.text}');
         await _ask(
@@ -425,11 +425,11 @@ class _TestPageState extends State<TestPage> {
 
   Widget _testCard(int index, Future<void> Function() onRun, String hint) {
     final result = _results[index];
-    final (icon, color) = switch (result.status) {
-      _Status.pending => (Icons.radio_button_unchecked, Colors.grey),
-      _Status.running => (Icons.hourglass_top, Colors.orange),
-      _Status.passed => (Icons.check_circle, Colors.green),
-      _Status.failed => (Icons.cancel, Colors.red),
+    final (label, color) = switch (result.status) {
+      _Status.pending => ('', Colors.grey),
+      _Status.running => ('EN CURSO', Colors.orange),
+      _Status.passed => ('BIEN', Colors.green),
+      _Status.failed => ('FALLÓ', Colors.red),
     };
     return Card(
       child: Padding(
@@ -437,23 +437,22 @@ class _TestPageState extends State<TestPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Icon(icon, color: color),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    _tests[index],
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
+            Text(
+              _tests[index],
+              style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 4),
             Text(hint, style: Theme.of(context).textTheme.bodySmall),
-            if (result.detail.isNotEmpty) ...[
+            if (label.isNotEmpty) ...[
               const SizedBox(height: 4),
-              Text(result.detail),
+              Text.rich(TextSpan(children: [
+                TextSpan(
+                  text: label,
+                  style: TextStyle(color: color, fontWeight: FontWeight.bold),
+                ),
+                if (result.detail.isNotEmpty)
+                  TextSpan(text: ' ${result.detail}'),
+              ])),
             ],
             const SizedBox(height: 8),
             FilledButton(
@@ -533,21 +532,27 @@ class _TestPageState extends State<TestPage> {
             const LinearProgressIndicator(),
           ],
           const SizedBox(height: 8),
+          Text(
+            'Haz las pruebas en este orden. Si la impresora queda en '
+            '"Downloading...", apágala y préndela antes de seguir.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
           _testCard(0, _test1, 'Conecta e imprime el ticket con 2 copias.'),
-          _testCard(1, _test2,
-              'Imprime y cancela a los 4 s. Dice qué muestra la impresora y si vuelve a imprimir.'),
-          _testCard(2, _test3,
-              'Imprime y te pide apagar la impresora. Luego la prendes y vuelve a imprimir.'),
+          _testCard(1, _test6,
+              'Imprime, cancela sin nada en curso y vuelve a imprimir.'),
+          _testCard(2, _test5,
+              'Con la impresora sana, le manda el reinicio y ve si reacciona.'),
           _testCard(3, _test4,
               'Imprime y te pide quitar el papel. Luego lo pones y vuelve a imprimir.'),
-          _testCard(4, _test5,
-              'Con la impresora sana, le manda el reinicio y ve si reacciona.'),
-          _testCard(5, _test6,
-              'Imprime, cancela sin nada en curso y vuelve a imprimir.'),
-          _testCard(6, _test7,
-              'Como la 2, pero al reconectar le pide al plugin reiniciar la impresora primero.'),
-          _testCard(7, _test8,
+          _testCard(4, _test8,
               'Imprime y cancela a los 4 s mandando el reinicio ANTES de cerrar la conexión. Es el que debería evitar el Downloading.'),
+          _testCard(5, _test7,
+              'Imprime, cancela a los 4 s y reconecta pidiendo el reinicio. Si la impresora queda trabada, no lo logra.'),
+          _testCard(6, _test2,
+              'Imprime y cancela a los 4 s sin reinicio. Suele dejar la impresora en Downloading...: apágala y préndela después.'),
+          _testCard(7, _test3,
+              'Imprime y te pide apagar la impresora. Luego la prendes y vuelve a imprimir.'),
           const SizedBox(height: 8),
           FilledButton.icon(
             onPressed: _copy,
