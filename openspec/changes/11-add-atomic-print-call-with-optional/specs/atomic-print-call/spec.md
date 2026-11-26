@@ -42,6 +42,14 @@ Atomic calls SHALL run one at a time in arrival order, each on its own connectio
 - **THEN** only the running call ends with `PrinterErrorType.cancelled`
 - **AND** the calls waiting in the queue still run
 
+### Requirement: Cancel aimed at one call never hits the next
+`cancel()` SHALL act on the call that was running when it was called; if that call ended and the next queued call started in the meantime, the next call SHALL NOT be cancelled.
+
+#### Scenario: Cancel arrives as a call ends
+- **GIVEN** an atomic call is running and another waits in the queue
+- **WHEN** `cancel()` is called at the moment the running call ends and the queued call starts
+- **THEN** the queued call is not cancelled and completes with `Success`
+
 ### Requirement: Optional completion confirmation
 `confirmCompletion` SHALL default to `true`. With `true` the call waits for the completion confirmation within `completionTimeout`. With `false` it SHALL return `Success` once every byte was sent and the connection is closed, without waiting for the confirmation.
 
@@ -53,6 +61,11 @@ Atomic calls SHALL run one at a time in arrival order, each on its own connectio
 #### Scenario: confirmCompletion is true
 - **WHEN** `confirmCompletion` is `true` (the default)
 - **THEN** the call waits for the completion confirmation within `completionTimeout`, as `closePort: true` does today
+
+#### Scenario: Documentation states what the confirmation means
+- **WHEN** a developer reads the README, the `///` comments or `PrinterLimits.completionTimeout`
+- **THEN** they say the confirmation means the printer processed everything it was sent, not that it finished printing
+- **AND** none of them says the confirmation arrives after the print is physically finished
 
 #### Scenario: Three-step API without confirmation keeps the grace delay
 - **GIVEN** the three-step API with `closePort: true` and `confirmCompletion: false`
@@ -80,6 +93,14 @@ An atomic call SHALL leave nothing open on any path and SHALL report typed error
 #### Scenario: macAddress with closePort
 - **WHEN** an atomic call also receives `closePort`
 - **THEN** the call still closes at the end and `closePort` has no effect
+
+### Requirement: Pairing PINs are read consistently
+The pairing receiver SHALL use one consistent set of target address, PIN and fallback PIN for a pairing attempt, even when a queued atomic call starts and replaces them at the same moment.
+
+#### Scenario: Next queued call starts during a pairing failure
+- **GIVEN** a pairing attempt of one atomic call fails with an authentication error
+- **WHEN** the next queued atomic call starts and replaces the stored PIN and fallback PIN at that moment
+- **THEN** the receiver does not crash and does not mix the PIN of one call with the fallback of another
 
 ### Requirement: Phase timing log
 When an atomic call ends, in success or failure, the Android log SHALL have one line with the milliseconds of each phase: connect, render, send and confirm. The API SHALL NOT return the times to Dart, and the line SHALL NOT contain device MAC addresses.

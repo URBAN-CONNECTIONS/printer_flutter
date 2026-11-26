@@ -11,6 +11,7 @@ import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 import kotlin.test.AfterTest
@@ -41,6 +42,8 @@ class PrinterSessionTest {
   private fun session(
     sleeper: (Long) -> Unit = {},
     closeGraceMs: Long = 0,
+    onCancelWindow: () -> Unit = {},
+    beforeCancel: () -> Unit = {},
     configure: (FakeTransport) -> Unit = {},
   ) = PrinterSession(
     newConnection = {
@@ -52,6 +55,8 @@ class PrinterSessionTest {
     sleeper = sleeper,
     resetSettleMs = 300,
     closeGraceMs = closeGraceMs,
+    onCancelWindow = onCancelWindow,
+    beforeCancel = beforeCancel,
   )
 
   @Test
@@ -574,6 +579,156 @@ class PrinterSessionTest {
       assertContentEquals("B".toByteArray() + PrinterSession.COMPLETION_REQUEST, transports[1].written.toByteArray())
       assertContentEquals("C".toByteArray() + PrinterSession.COMPLETION_REQUEST, transports[2].written.toByteArray())
     } finally {
+      executor.shutdownNow()
+    }
+  }
+
+  @Test
+  fun runAtomic_aCancelStoppedAtTheBoundaryNeverCancelsTheNextQueuedCall() {
+    // The cancel thread is held after it saw call A running and before it flags it. Meanwhile A is
+    // released, so the boundary between A and B is crossed while the cancel is still undecided.
+    val reachedWindow = CountDownLatch(1)
+    val releaseCancel = CountDownLatch(1)
+    val firstCancel = AtomicBoolean(true)
+    val session = session(
+      onCancelWindow = {
+        if (firstCancel.compareAndSet(true, false)) {
+          reachedWindow.countDown()
+          releaseCancel.await(5, TimeUnit.SECONDS)
+        }
+      },
+    ) { it.autoReply = true }
+    val executor = Executors.newSingleThreadExecutor()
+    try {
+      val aStarted = CountDownLatch(1)
+      val finishA = CountDownLatch(1)
+      val bStarted = CountDownLatch(1)
+      val finishB = CountDownLatch(1)
+      val executorThread = AtomicReference<Thread>()
+
+      val a = executor.submit<String> {
+        session.runAtomic("AA:BB", 1_000, confirmCompletion = true, limits = limits, phases = PhaseTimer()) {
+          executorThread.set(Thread.currentThread())
+          aStarted.countDown()
+          finishA.await(5, TimeUnit.SECONDS)
+          it.write("A".toByteArray(), 5_000)
+        }
+      }
+      assertTrue(aStarted.await(2, TimeUnit.SECONDS))
+      val b = executor.submit<String> {
+        session.runAtomic("AA:BB", 1_000, confirmCompletion = true, limits = limits, phases = PhaseTimer()) {
+          bStarted.countDown()
+          finishB.await(5, TimeUnit.SECONDS)
+          it.write("B".toByteArray(), 5_000)
+        }
+      }
+      val canceller = thread { session.cancel() }
+      assertTrue(reachedWindow.await(2, TimeUnit.SECONDS))
+
+      // Let A end. Without the lock B starts now; with it, the end of A waits for the cancel.
+      finishA.countDown()
+      val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+      while (bStarted.count > 0 && executorThread.get().state != Thread.State.BLOCKED) {
+        assertTrue(System.nanoTime() < deadline, "neither B started nor A waited for the cancel")
+        Thread.sleep(1)
+      }
+      releaseCancel.countDown()
+      canceller.join(3_000)
+      finishB.countDown()
+
+      assertEquals("Success", a.get(3, TimeUnit.SECONDS))
+      assertEquals("Success", b.get(3, TimeUnit.SECONDS))
+      assertEquals(2, transports.size)
+      assertContentEquals("B".toByteArray() + PrinterSession.COMPLETION_REQUEST, transports[1].written.toByteArray())
+    } finally {
+      releaseCancel.countDown()
+      executor.shutdownNow()
+    }
+  }
+
+  @Test
+  fun cancel_heldAfterTheLockNeverClosesTheConnectionOfTheNextCall() {
+    // Call A leaves the connection open and ends; call B reuses it. The cancel that saw A running is
+    // held after it released the lock, so B starts before the cancel acts on the connection.
+    val reachedCancel = CountDownLatch(1)
+    val releaseCancel = CountDownLatch(1)
+    val session = session(
+      beforeCancel = {
+        reachedCancel.countDown()
+        releaseCancel.await(5, TimeUnit.SECONDS)
+      },
+    ) { it.autoReply = true }
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+    val executor = Executors.newSingleThreadExecutor()
+    try {
+      val aStarted = CountDownLatch(1)
+      val finishA = CountDownLatch(1)
+      val bStarted = CountDownLatch(1)
+      val finishB = CountDownLatch(1)
+
+      val a = executor.submit<String> {
+        session.runJob(closePort = false, limits = limits) {
+          aStarted.countDown()
+          finishA.await(5, TimeUnit.SECONDS)
+        }
+      }
+      assertTrue(aStarted.await(2, TimeUnit.SECONDS))
+      val canceller = thread { session.cancel() }
+      assertTrue(reachedCancel.await(2, TimeUnit.SECONDS))
+      finishA.countDown()
+      assertEquals("Success", a.get(3, TimeUnit.SECONDS))
+
+      val b = executor.submit<String> {
+        session.runJob(closePort = false, limits = limits) {
+          bStarted.countDown()
+          finishB.await(5, TimeUnit.SECONDS)
+          it.write("B".toByteArray(), 5_000)
+        }
+      }
+      assertTrue(bStarted.await(2, TimeUnit.SECONDS))
+      releaseCancel.countDown()
+      canceller.join(3_000)
+      assertFalse(canceller.isAlive)
+      finishB.countDown()
+
+      assertEquals("Success", b.get(3, TimeUnit.SECONDS))
+      assertFalse(transports.single().closed)
+      assertContentEquals("B".toByteArray(), transports.single().written.toByteArray())
+    } finally {
+      releaseCancel.countDown()
+      executor.shutdownNow()
+    }
+  }
+
+  @Test
+  fun cancel_stillClosesTheConnectionOfTheCallItSawRunning() {
+    val reachedCancel = CountDownLatch(1)
+    val releaseCancel = CountDownLatch(1)
+    val session = session(
+      beforeCancel = {
+        reachedCancel.countDown()
+        releaseCancel.await(5, TimeUnit.SECONDS)
+      },
+    ) { it.blockWrites = true }
+    val executor = Executors.newSingleThreadExecutor()
+    try {
+      val started = CountDownLatch(1)
+      val call = executor.submit<String> {
+        session.runAtomic("AA:BB", 1_000, confirmCompletion = true, limits = limits, phases = PhaseTimer()) {
+          started.countDown()
+          it.write("A".toByteArray(), 5_000)
+        }
+      }
+      assertTrue(started.await(2, TimeUnit.SECONDS))
+      val canceller = thread { session.cancel() }
+      assertTrue(reachedCancel.await(2, TimeUnit.SECONDS))
+      releaseCancel.countDown()
+      canceller.join(3_000)
+
+      val failure = assertFailsWith<ExecutionException> { call.get(3, TimeUnit.SECONDS) }
+      assertEquals(PrinterErrorCode.CANCELLED, (failure.cause as PrinterException).code)
+    } finally {
+      releaseCancel.countDown()
       executor.shutdownNow()
     }
   }

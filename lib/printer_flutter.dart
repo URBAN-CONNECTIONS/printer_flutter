@@ -189,9 +189,9 @@ class PrinterFlutter {
   /// Prints the PDF at [filePath].
   ///
   /// Each chunk sent must be accepted within [writeTimeout]. With [closePort],
-  /// the printer must confirm it printed everything within [completionTimeout],
-  /// counted from the last byte sent. The confirmation means the printer
-  /// processed everything it was sent, not that it finished printing.
+  /// the printer must confirm it processed everything it was sent within
+  /// [completionTimeout], counted from the last byte sent. The confirmation does
+  /// not mean the printer finished printing.
   /// Failures throw a [PrinterException].
   ///
   /// With [macAddress] the call is atomic: it opens the connection to that

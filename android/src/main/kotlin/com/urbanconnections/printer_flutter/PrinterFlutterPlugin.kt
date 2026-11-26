@@ -40,10 +40,9 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
   private val BLUETOOTH_ENABLE_REQUEST_CODE = 1002
 
   // Auto-pairing state
-  // Written on the main thread by openPort and on the job thread by an atomic call; read by the receiver.
-  @Volatile private var targetMacAddress: String? = null
-  @Volatile private var currentPin: String = "0000"
-  @Volatile private var currentFallbackPin: String? = "1234"
+  // MAC, PIN and fallback PIN of the call in progress, kept as one value. Replaced in one write by
+  // openPort (main thread) and by an atomic call (job thread); read once per event by the receiver.
+  private val pairing = PairingCredentials()
   private var receiverRegistered = false
 
   // Single thread executor to run printer jobs off the main thread, one at a time.
@@ -70,14 +69,16 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
         intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
       }
 
-      if (device == null || targetMacAddress == null) return
-      if (!device.address.equals(targetMacAddress, ignoreCase = true)) return
+      // Another thread can replace the target while the event is handled, so it is read once.
+      val target = pairing.read()
+
+      if (device == null || !target.matches(device.address)) return
 
       if (BluetoothDevice.ACTION_PAIRING_REQUEST == action) {
         val pairingVariant = intent.getIntExtra(BluetoothDevice.EXTRA_PAIRING_VARIANT, BluetoothDevice.ERROR)
         if (pairingVariant == BluetoothDevice.PAIRING_VARIANT_PIN || pairingVariant == 0) {
           try {
-            val pinBytes = currentPin.toByteArray(Charsets.UTF_8)
+            val pinBytes = target.pin.toByteArray(Charsets.UTF_8)
             device.setPin(pinBytes)
             
             try {
@@ -87,7 +88,7 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
             }
             
             abortBroadcast()
-            Log.d("PrinterFlutterPlugin", "Auto-pairing with PIN $currentPin for ${device.address}")
+            Log.d("PrinterFlutterPlugin", "Auto-pairing with the configured PIN")
           } catch (e: Exception) {
             Log.e("PrinterFlutterPlugin", "Failed to auto-pair: ${e.message}")
           }
@@ -99,10 +100,9 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
         if (bondState == BluetoothDevice.BOND_NONE && previousBondState == BluetoothDevice.BOND_BONDING) {
           val reason = intent.getIntExtra("android.bluetooth.device.extra.REASON", -1)
           // 1 is UNBOND_REASON_AUTH_FAILED
-          if (reason == 1 && currentFallbackPin != null && currentPin != currentFallbackPin) {
-            Log.d("PrinterFlutterPlugin", "Pairing failed with $currentPin, trying fallback $currentFallbackPin")
-            currentPin = currentFallbackPin!!
-            currentFallbackPin = null // Only fallback once
+          // Only fallback once, and never over the values of a call that started in the meantime.
+          if (reason == 1 && pairing.switchToFallback(target) != null) {
+            Log.d("PrinterFlutterPlugin", "Pairing failed with the configured PIN, trying the fallback PIN")
             try {
                device.javaClass.getMethod("createBond").invoke(device)
             } catch (e: Exception) {
@@ -135,9 +135,13 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
         val connectTimeoutMs = call.longArgument("connectTimeoutMs", PrinterSession.DEFAULT_CONNECT_TIMEOUT_MS)
         val resetAfterFailure = call.argument<Boolean>("resetPrinterAfterFailure") ?: false
 
-        targetMacAddress = macAddress.uppercase()
-        currentPin = call.argument<String>("pin") ?: "0000"
-        currentFallbackPin = call.argument<String>("fallbackPin")
+        pairing.replace(
+          PairingTarget(
+            macAddress = macAddress.uppercase(),
+            pin = call.argument<String>("pin") ?: PairingCredentials.DEFAULT_PIN,
+            fallbackPin = call.argument<String>("fallbackPin"),
+          ),
+        )
 
         executeInBackground(result) {
           session.open(macAddress, connectTimeoutMs, resetAfterFailure)
@@ -344,15 +348,13 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
   ) {
     val connectTimeoutMs = call.longArgument("connectTimeoutMs", PrinterSession.DEFAULT_CONNECT_TIMEOUT_MS)
     val confirmCompletion = call.argument<Boolean>("confirmCompletion") ?: true
-    val pin = call.argument<String>("pin") ?: "0000"
+    val pin = call.argument<String>("pin") ?: PairingCredentials.DEFAULT_PIN
     val fallbackPin = call.argument<String>("fallbackPin")
     val limits = jobLimitsFrom(call)
     val phases = PhaseTimer()
 
     executeInBackground(result) {
-      targetMacAddress = macAddress.uppercase()
-      currentPin = pin
-      currentFallbackPin = fallbackPin
+      pairing.replace(PairingTarget(macAddress.uppercase(), pin, fallbackPin))
       try {
         session.runAtomic(macAddress, connectTimeoutMs, confirmCompletion, limits, phases) { conn ->
           send(conn, phases)

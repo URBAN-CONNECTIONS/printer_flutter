@@ -188,7 +188,7 @@ Every call ends within its limits; no call can wait forever.
 |---|---|---|
 | `connectTimeout` | 15 s | `openPort`, and the connect step of an atomic call |
 | `writeTimeout` | 20 s per 4 KB chunk | `printPdf`, `sendTspl`, `sendRawBytes` |
-| `completionTimeout` | 60 s from the last byte | the printer's confirmation when `closePort: true`, or in an atomic call with `confirmCompletion: true`; includes printing every copy |
+| `completionTimeout` | 60 s from the last byte | the printer's confirmation that it processed everything it was sent, when `closePort: true`, or in an atomic call with `confirmCompletion: true`; not a confirmation that printing finished |
 
 Failures throw `PrinterException`:
 

@@ -18,7 +18,7 @@ Today `PrinterSession` holds one global connection. `open`, `runJob` and `closeP
 ## Decisions
 
 - **Queue by reusing the existing single-thread executor.** Atomic calls are posted with `executeInBackground`, so FIFO order and "never on the main thread" come for free; each atomic call is one task. Alternative: a second queue class (discarded: two orderings to reason about).
-- **New method `PrinterSession.runAtomic(macAddress, connectTimeoutMs, confirmCompletion, limits, phases, send)`.** It closes any connection left open by hand (takeover), opens a fresh connection via `newConnection`, runs `send`, then either awaits the `OUT` marker (`confirmCompletion` true) or just closes (false), and closes on every path. Alternative: compose `open` + `runJob` (discarded: they run as separate `exclusive` blocks, so a cancel arriving between them would hit the gap).
+- **New method `PrinterSession.runAtomic(macAddress, connectTimeoutMs, confirmCompletion, limits, phases, send)`.** It closes any connection left open by hand (takeover), opens a fresh connection via `newConnection`, runs `send`, then either awaits the `OUT` marker (`confirmCompletion` true) or, without waiting for the marker, waits the close-grace delay and closes (false), and closes on every path. Alternative: compose `open` + `runJob` (discarded: they run as separate `exclusive` blocks, so a cancel arriving between them would hit the gap).
 - **Scoped cancel.** `cancelRequested` is reset at the start of each `runAtomic`, as `exclusive` already does, so a cancel only affects the call that is running; queued calls start with a clean flag. A cancel that arrives while nothing runs does nothing (`busy` guard), which also keeps queued calls alive.
 - **Phase timing in a plain Kotlin class `PhaseTimer`** with an injectable clock. It records connect, render, send and confirm milliseconds and formats one line without MAC addresses or PINs. `PrinterFlutterPlugin` logs the line with `Log.i` when the atomic call ends. The render phase is measured inside the `send` lambda for `printPdf` (a `PhaseTimer` is passed in); for TSPL/raw it is 0.
 - **`confirmCompletion=false` on the three-step API.** `runJob` gains a `confirmCompletion` parameter (default `true`). With `closePort` true and it false, `runJob` sleeps `closeGraceMs` and closes instead of awaiting the marker.
@@ -57,6 +57,8 @@ sequenceDiagram
 - `docs/adr/` has `0001-...md`; the new ADR is `0002-printing-is-done-with-an-atomic-native-call.md`, with the heading `# 2. <title>` like the existing one, and the text exactly as given in the issue (in English).
 - The existing channel key for the connect timeout is `connectTimeoutMs` (as used by `openPort`); the atomic call reuses it.
 - `completionTimeout` and write timeout keep their existing arguments and defaults.
+- With `confirmCompletion: false`, the atomic call still waits the existing close-grace delay (`CLOSE_GRACE_MS`) before closing, as `closePort` does, so the last bytes reach the printer; it does not write the completion request or wait for the marker. The README says so.
+- The profile `analyze` command (`flutter analyze --no-pub`) exits 1 on two existing `info` diagnostics in `example/` (deprecated `material.dart` import on Flutter 3.50), while CI runs `flutter analyze --no-fatal-infos`. A file-level `// ignore_for_file: deprecated_member_use` in `example/lib/main.dart` and `example/test/widget_test.dart` is accepted in this change so the validation gate is green; migrating the import is a separate change.
 ## From the issue: Decisions
 
 ### D2. Measure before optimizing
@@ -129,3 +131,31 @@ Discarded: returning the times to Dart (API change).
 - On the RT-320 PB, print with `macAddress` and `confirmCompletion` true and false; it prints once and the connection closes.
 - Tap print twice quickly: both jobs print in order, with no `notConnected`.
 - Print the 72 x 240 mm ticket with 2 copies and copy the phase log line into the pull request.
+
+## Documentation from the issue
+
+- Add these entries to `GLOSSARY.md`, under its existing heading, after the existing ones, exactly as written. They are vocabulary only; nothing else in that file changes.
+
+**Job**:
+One complete print, from opening the connection to confirming and closing it.
+_Avoid_: call, command
+
+**Atomic call**:
+The way of printing that receives `macAddress` and does the whole job in one call.
+_Avoid_: simple mode
+
+**Completion confirmation**:
+The `OUT` answer that says the printer processed everything it was sent.
+_Avoid_: ACK, printed
+
+**Not confirmed**:
+A timeout after everything was sent: the printer did not confirm it processed the job, and it may still have printed.
+_Avoid_: failed
+
+- Add this decision record to `docs/adr/`, with no number (it is numbered when it is written):
+
+**Printing is done with an atomic native call**
+
+A print job was three calls on a global connection, and two quick taps could close each other's connection. An optional `macAddress` is added to the print calls so the whole job is one native unit in a queue. A queue only in Dart was discarded because other instances or isolates would skip it. The three-step API stays so nobody breaks.
+
+Related: #1

@@ -17,7 +17,28 @@ class PrinterSession(
   private val resetSettleMs: Long = RESET_SETTLE_MS,
   private val closeGraceMs: Long = CLOSE_GRACE_MS,
   private val onWarning: (String) -> Unit = {},
+  /**
+   * Test seam: called by [cancel] while it holds [lock], after it saw a call running and before it
+   * flags it. The default does nothing. Tests block here to stop a cancel exactly at the boundary
+   * between two calls.
+   */
+  private val onCancelWindow: () -> Unit = {},
+  /**
+   * Test seam: called by [cancel] after it released [lock] and before it closes the connection it
+   * saw. The default does nothing. Tests block here to let the call end and the next one start.
+   */
+  private val beforeCancel: () -> Unit = {},
 ) {
+  /**
+   * Guards [busy] and [cancelRequested] so a cancel is decided against one call only: it never
+   * flags a call that started after the one it saw running. Held only for those writes, never
+   * while blocking on I/O.
+   */
+  private val lock = Any()
+
+  /** The number of the call in progress, raised when each call starts. Read and written under [lock]. */
+  private var generation = 0L
+
   /** The open connection, read by [cancel] from another thread. */
   @Volatile private var connection: PrinterConnection? = null
 
@@ -161,15 +182,28 @@ class PrinterSession(
    * call is running, so a cancel that arrives between two jobs never closes the idle connection.
    */
   fun cancel() {
-    if (!busy) return
-    cancelRequested = true
-    connection?.cancel()
+    // The check and the flag are one step against the start and end of a call, so a cancel aimed at
+    // the call it saw running cannot land on the next one in the queue. The connection is cancelled
+    // outside the lock, because closing it may block. A call can end and the next one start, reusing
+    // that connection, before the cancel gets there, so the call number is checked again first.
+    val (target, seenGeneration) = synchronized(lock) {
+      if (!busy) return
+      onCancelWindow()
+      cancelRequested = true
+      Pair(connection, generation)
+    }
+    if (target == null) return
+    beforeCancel()
+    if (synchronized(lock) { generation == seenGeneration }) target.cancel()
   }
 
   /** Called when the plugin detaches: aborts whatever is running. */
   fun shutdown() {
-    cancelRequested = true
-    connection?.cancel()
+    val target = synchronized(lock) {
+      cancelRequested = true
+      connection
+    }
+    target?.cancel()
   }
 
   /**
@@ -211,12 +245,15 @@ class PrinterSession(
   }
 
   private inline fun <T> exclusive(block: () -> T): T {
-    cancelRequested = false
-    busy = true
+    synchronized(lock) {
+      cancelRequested = false
+      busy = true
+      generation++
+    }
     try {
       return block()
     } finally {
-      busy = false
+      synchronized(lock) { busy = false }
     }
   }
 
