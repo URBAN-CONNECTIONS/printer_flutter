@@ -213,8 +213,9 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
               filePath = filePath,
               options = options,
               copies = copies,
-              sendCommand = { bytes -> conn.write(bytes, limits.writeTimeoutMs) },
+              sendBlock = { bytes -> conn.writeBlock(bytes, limits.writeTimeoutMs) },
               sendString = { str -> conn.write(str.toByteArray(), limits.writeTimeoutMs) },
+              checkCancelled = { conn.checkCancelled() },
               phases = phases
             )
           }
@@ -225,8 +226,9 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
                 filePath = filePath,
                 options = options,
                 copies = copies,
-                sendCommand = { bytes -> conn.write(bytes, limits.writeTimeoutMs) },
-                sendString = { str -> conn.write(str.toByteArray(), limits.writeTimeoutMs) }
+                sendBlock = { bytes -> conn.writeBlock(bytes, limits.writeTimeoutMs) },
+                sendString = { str -> conn.write(str.toByteArray(), limits.writeTimeoutMs) },
+                checkCancelled = { conn.checkCancelled() }
               )
             }
           }

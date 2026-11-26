@@ -7,9 +7,9 @@
 
 ## 2. Bands and rendering
 
-- [ ] 2.1 Add a plain-Kotlin band splitter (at most 200 rows per `BITMAP`, `y` offsets, last band may be shorter, page under 200 rows is one `BITMAP`) and use it in `printPageByPage` and `printUnifiedRoll`, converting/dithering the whole page first; verify with JVM tests that the bands reassemble to the same bytes as one `BITMAP` for 58, 72, 80 mm and a custom width
-- [ ] 2.2 Check cancel before every block sent by `PdfPrintHelper` (bands, `DOWNLOAD` files, `PRINT`), so nothing follows the block in progress; verify with a JVM test over a fake sender that no `PRINT` and no later block is sent after a cancel
-- [ ] 2.3 Stop rendering and conversion at each page and every 128 rows when cancelled, and recycle every bitmap in `finally`; verify the cancel check logic with a JVM test and describe the by-hand check for `Bitmap` rendering in the final report
+- [x] 2.1 Add a plain-Kotlin band splitter (at most 200 rows per `BITMAP`, `y` offsets, last band may be shorter, page under 200 rows is one `BITMAP`) and use it in `printPageByPage` and `printUnifiedRoll`, converting/dithering the whole page first; verify with JVM tests that the bands reassemble to the same bytes as one `BITMAP` for 58, 72, 80 mm and a custom width
+- [x] 2.2 Check cancel before every block sent by `PdfPrintHelper` (bands, `DOWNLOAD` files, `PRINT`), so nothing follows the block in progress; verify with a JVM test over a fake sender that no `PRINT` and no later block is sent after a cancel
+- [x] 2.3 Stop rendering and conversion at each page and every 128 rows when cancelled, and recycle every bitmap in `finally`; verify the cancel check logic with a JVM test and describe the by-hand check for `Bitmap` rendering in the final report
 
 ## 3. Documentation
 
