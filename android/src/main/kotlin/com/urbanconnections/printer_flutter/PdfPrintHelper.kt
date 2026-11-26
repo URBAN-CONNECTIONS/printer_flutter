@@ -49,7 +49,13 @@ object PdfPrintHelper {
         val cancel = CancelCheck(checkCancelled)
 
         val fileDescriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-        val pdfRenderer = PdfRenderer(fileDescriptor)
+        // A corrupt, encrypted or non-PDF file makes the renderer throw: the descriptor must still close.
+        val pdfRenderer = try {
+            PdfRenderer(fileDescriptor)
+        } catch (e: Throwable) {
+            fileDescriptor.close()
+            throw e
+        }
 
         try {
             val pageCount = pdfRenderer.pageCount
@@ -265,7 +271,7 @@ object PdfPrintHelper {
 
         println("PdfPrintHelper: Sending initial KILL command...")
         sender.command("KILL \"P*.PCX\"\r\n")
-        Thread.sleep(200)
+        pauseUnlessCancelled(200, cancel)
 
         val cachedPages = mutableListOf<String>()
 
@@ -286,7 +292,7 @@ object PdfPrintHelper {
 
                 // Give the printer filesystem a moment to save the file
                 // to avoid buffer overflow or file system crashes on weak thermal printers.
-                Thread.sleep(300)
+                pauseUnlessCancelled(300, cancel)
 
                 val heightMm = (finalHeight / (203 / 25.4)).roundToInt()
                 val sizeCmd = "SIZE $paperWidthMm mm, $heightMm mm\r\nGAP 0,0\r\nDIRECTION 0\r\nCLS\r\n"
@@ -519,5 +525,17 @@ object PdfPrintHelper {
             }
         }
         return height
+    }
+
+    /** Pauses [totalMs] in slices of at most 50 ms, checking for a cancel between them. */
+    private fun pauseUnlessCancelled(totalMs: Long, cancel: CancelCheck) {
+        var waited = 0L
+        while (waited < totalMs) {
+            cancel.now()
+            val slice = minOf(50L, totalMs - waited)
+            Thread.sleep(slice)
+            waited += slice
+        }
+        cancel.now()
     }
 }

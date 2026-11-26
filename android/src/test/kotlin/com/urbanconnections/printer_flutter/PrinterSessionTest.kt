@@ -111,6 +111,47 @@ class PrinterSessionTest {
   }
 
   @Test
+  fun runJob_cancelledAfterTheLastCheckIsNotReportedAsSuccess() {
+    val session = session { it.autoReply = true }
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+
+    val error = assertFailsWith<PrinterException> {
+      session.runJob(closePort = false, limits = limits) { session.cancel() }
+    }
+
+    assertEquals(PrinterErrorCode.CANCELLED, error.code)
+    assertTrue(transports.single().closed)
+    // The dead connection is dropped, so the next job says so instead of failing on a closed socket.
+    val next = assertFailsWith<PrinterException> {
+      session.runJob(closePort = false, limits = limits) { it.write("x".toByteArray(), 1_000) }
+    }
+    assertEquals(PrinterErrorCode.NOT_CONNECTED, next.code)
+  }
+
+  @Test
+  fun closePort_cancelledDuringTheGraceWaitEndsWithCancelledAndCloses() {
+    lateinit var session: PrinterSession
+    session = session(sleeper = { session.cancel() }, closeGraceMs = PrinterSession.CLOSE_GRACE_MS)
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+
+    val error = assertFailsWith<PrinterException> { session.closePort() }
+
+    assertEquals(PrinterErrorCode.CANCELLED, error.code)
+    assertTrue(transports.single().closed)
+  }
+
+  @Test
+  fun shutdown_stopsCallsThatHaveNotStarted() {
+    val session = session()
+
+    session.shutdown()
+
+    val error = assertFailsWith<PrinterException> { session.open("AA:BB", 1_000, resetAfterFailure = false) }
+    assertEquals(PrinterErrorCode.CANCELLED, error.code)
+    assertTrue(transports.isEmpty())
+  }
+
+  @Test
   fun runJob_withClosePortAndNoConfirmationWaitsTheGraceTimeThenCloses() {
     val slept = mutableListOf<Long>()
     val session = session(sleeper = { slept.add(it) }, closeGraceMs = PrinterSession.CLOSE_GRACE_MS)

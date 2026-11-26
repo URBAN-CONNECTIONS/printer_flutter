@@ -25,6 +25,7 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
 import io.flutter.plugin.common.PluginRegistry
+import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 
@@ -176,15 +177,13 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
         val probe = call.argument<Boolean>("probe") ?: false
         val limits = jobLimitsFrom(call)
         val atomicMac = atomicMacAddress(call)
-        if (atomicMac != null && bytes != null) {
+        if (bytes == null) {
+          result.error("INVALID_ARGUMENT", "No bytes provided", null)
+        } else if (atomicMac != null) {
           executeAtomic(call, result, atomicMac) { conn, _ -> conn.write(bytes, limits.writeTimeoutMs) }
         } else {
           executeInBackground(result) {
-            if (bytes == null) {
-              "No bytes provided"
-            } else {
-              session.runJob(closePort, limits, confirmCompletion, probe) { conn -> conn.write(bytes, limits.writeTimeoutMs) }
-            }
+            session.runJob(closePort, limits, confirmCompletion, probe) { conn -> conn.write(bytes, limits.writeTimeoutMs) }
           }
         }
       }
@@ -207,7 +206,10 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
         val probe = call.argument<Boolean>("probe") ?: false
         val limits = jobLimitsFrom(call)
         val atomicMac = atomicMacAddress(call)
-        if (atomicMac != null) {
+        if (!File(filePath).exists()) {
+          // Known at call time: fail before connecting and probing.
+          result.error("FILE_NOT_FOUND", "PDF file not found at path: $filePath", null)
+        } else if (atomicMac != null) {
           executeAtomic(call, result, atomicMac) { conn, phases ->
             PdfPrintHelper.printPdf(
               filePath = filePath,

@@ -66,6 +66,9 @@ class PrinterSession(
   /** true when [cancel] arrived during the running call, even before it had a connection. */
   @Volatile private var cancelRequested = false
 
+  /** true after [shutdown]: every call that has not started yet ends with [PrinterErrorCode.CANCELLED]. */
+  @Volatile private var shutDown = false
+
   /** The [clock] time at which the last cancelled call ended; null when no call was cancelled. */
   @Volatile private var cancelledCallEndedAt: Long? = null
 
@@ -132,6 +135,8 @@ class PrinterSession(
         }
         closeConnection()
       }
+      // A cancel that landed after the last check closed the connection: report it, and drop it.
+      throwIfCancelRequested()
       lastJobFailed = false
       "Success"
     } catch (e: Throwable) {
@@ -186,6 +191,7 @@ class PrinterSession(
           waitUnlessCancelled(closeGraceMs)
         }
       }
+      throwIfCancelRequested()
       lastJobFailed = false
       "Success"
     } catch (e: Throwable) {
@@ -196,11 +202,18 @@ class PrinterSession(
     }
   }
 
-  /** Closes the connection. Gives the printer time to receive the last bytes first, as the TSC SDK did. */
+  /**
+   * Closes the connection. Gives the printer time to receive the last bytes first, as the TSC SDK
+   * did. A [cancel] during that time ends it at once with [PrinterErrorCode.CANCELLED]; the
+   * connection is closed either way.
+   */
   fun closePort(): String = exclusive {
-    val current = connection
-    if (current != null && current.isOpen) sleeper(closeGraceMs)
-    closeConnection()
+    try {
+      val current = connection
+      if (current != null && current.isOpen) waitUnlessCancelled(closeGraceMs)
+    } finally {
+      closeConnection()
+    }
     "Success"
   }
 
@@ -229,6 +242,7 @@ class PrinterSession(
   /** Called when the plugin detaches: aborts whatever is running. */
   fun shutdown() {
     val target = synchronized(lock) {
+      shutDown = true
       cancelRequested = true
       connection
     }
@@ -338,6 +352,8 @@ class PrinterSession(
       generation++
     }
     try {
+      // Calls still queued when the plugin detaches must not start.
+      if (shutDown) throw PrinterException(PrinterErrorCode.CANCELLED, "La impresión se canceló")
       return block()
     } finally {
       synchronized(lock) {
