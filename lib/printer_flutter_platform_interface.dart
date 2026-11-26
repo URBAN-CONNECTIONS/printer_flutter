@@ -42,18 +42,77 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
 
   /// Opens a Bluetooth connection to the printer using its MAC address.
   /// The [pin] and [fallbackPin] are used for automatic Bluetooth pairing on Android.
-  Future<String?> openPort(String macAddress,
-      {String pin = "0000", String? fallbackPin = "1234"}) {
+  ///
+  /// Gives up after [connectTimeout] with a [PrinterException] of type
+  /// [PrinterErrorType.notConnected]. With [resetPrinterAfterFailure], the printer
+  /// is reset with `<ESC>!R` first when the previous job failed.
+  Future<String?> openPort(
+    String macAddress, {
+    String pin = "0000",
+    String? fallbackPin = "1234",
+    Duration connectTimeout = PrinterLimits.connectTimeout,
+    bool resetPrinterAfterFailure = false,
+  }) {
     throw UnimplementedError('openPort() has not been implemented.');
   }
 
   /// Sends a TSPL command string to the connected printer.
-  Future<String?> sendTspl(String command, {bool closePort = false}) {
+  ///
+  /// Each chunk must be accepted within [writeTimeout]. With [closePort], waits
+  /// up to [completionTimeout] for the printer to confirm, then closes the port.
+  ///
+  /// With [macAddress] the call is atomic: it opens the connection (using [pin],
+  /// [fallbackPin] and [connectTimeout] like `openPort`), sends, confirms and
+  /// closes it, and [closePort] has no effect. Atomic calls queue first-in,
+  /// first-out; do not mix them with `openPort`. With [confirmCompletion] false
+  /// the call does not wait for the printer's confirmation. A timeout after
+  /// everything was sent means "not confirmed", not "it did not print".
+  ///
+  /// With [probe], the printer has to answer before any byte of the job is sent,
+  /// or the call fails with [PrinterErrorType.printerNotReady]. Unset, the probe
+  /// is on in an atomic call and off otherwise.
+  Future<String?> sendTspl(
+    String command, {
+    bool closePort = false,
+    Duration writeTimeout = PrinterLimits.writeTimeout,
+    Duration completionTimeout = PrinterLimits.completionTimeout,
+    String? macAddress,
+    String? pin,
+    String? fallbackPin,
+    Duration? connectTimeout,
+    bool confirmCompletion = true,
+    bool? probe,
+  }) {
     throw UnimplementedError('sendTspl() has not been implemented.');
   }
 
   /// Sends raw bytes to the connected printer.
-  Future<String?> sendRawBytes(Uint8List bytes, {bool closePort = false}) {
+  ///
+  /// Each chunk must be accepted within [writeTimeout]. With [closePort], waits
+  /// up to [completionTimeout] for the printer to confirm, then closes the port.
+  ///
+  /// With [macAddress] the call is atomic: it opens the connection (using [pin],
+  /// [fallbackPin] and [connectTimeout] like `openPort`), sends, confirms and
+  /// closes it, and [closePort] has no effect. Atomic calls queue first-in,
+  /// first-out; do not mix them with `openPort`. With [confirmCompletion] false
+  /// the call does not wait for the printer's confirmation. A timeout after
+  /// everything was sent means "not confirmed", not "it did not print".
+  ///
+  /// With [probe], the printer has to answer before any byte of the job is sent,
+  /// or the call fails with [PrinterErrorType.printerNotReady]. Unset, the probe
+  /// is on in an atomic call and off otherwise.
+  Future<String?> sendRawBytes(
+    Uint8List bytes, {
+    bool closePort = false,
+    Duration writeTimeout = PrinterLimits.writeTimeout,
+    Duration completionTimeout = PrinterLimits.completionTimeout,
+    String? macAddress,
+    String? pin,
+    String? fallbackPin,
+    Duration? connectTimeout,
+    bool confirmCompletion = true,
+    bool? probe,
+  }) {
     throw UnimplementedError('sendRawBytes() has not been implemented.');
   }
 
@@ -62,9 +121,41 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
     throw UnimplementedError('closePort() has not been implemented.');
   }
 
+  /// Aborts the job in progress; its call ends with a [PrinterException] of type
+  /// [PrinterErrorType.cancelled]. Does nothing when no job is running.
+  Future<void> cancel() {
+    throw UnimplementedError('cancel() has not been implemented.');
+  }
+
   /// Renders and prints a PDF file using the specified configuration.
-  Future<String?> printPdf(String filePath, PdfPrintOptions options,
-      {int copies = 1, bool closePort = false}) {
+  ///
+  /// Each chunk must be accepted within [writeTimeout]. With [closePort], the
+  /// printer must confirm within [completionTimeout], counted from the last byte.
+  ///
+  /// With [macAddress] the call is atomic: it opens the connection (using [pin],
+  /// [fallbackPin] and [connectTimeout] like `openPort`), sends, confirms and
+  /// closes it, and [closePort] has no effect. Atomic calls queue first-in,
+  /// first-out; do not mix them with `openPort`. With [confirmCompletion] false
+  /// the call does not wait for the printer's confirmation. A timeout after
+  /// everything was sent means "not confirmed", not "it did not print".
+  ///
+  /// With [probe], the printer has to answer before any byte of the job is sent,
+  /// or the call fails with [PrinterErrorType.printerNotReady]. Unset, the probe
+  /// is on in an atomic call and off otherwise.
+  Future<String?> printPdf(
+    String filePath,
+    PdfPrintOptions options, {
+    int copies = 1,
+    bool closePort = false,
+    Duration writeTimeout = PrinterLimits.writeTimeout,
+    Duration completionTimeout = PrinterLimits.completionTimeout,
+    String? macAddress,
+    String? pin,
+    String? fallbackPin,
+    Duration? connectTimeout,
+    bool confirmCompletion = true,
+    bool? probe,
+  }) {
     throw UnimplementedError('printPdf() has not been implemented.');
   }
 }

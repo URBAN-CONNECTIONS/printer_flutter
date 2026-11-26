@@ -18,24 +18,66 @@ class MockPrinterFlutterPlatform
   Future<bool> requestPermissions() => Future.value(true);
 
   @override
-  Future<String?> openPort(String macAddress,
-          {String pin = "0000", String? fallbackPin = "1234"}) =>
+  Future<String?> openPort(
+    String macAddress, {
+    String pin = "0000",
+    String? fallbackPin = "1234",
+    Duration connectTimeout = PrinterLimits.connectTimeout,
+    bool resetPrinterAfterFailure = false,
+  }) =>
       Future.value('Success');
 
   @override
-  Future<String?> sendTspl(String command, {bool closePort = false}) =>
+  Future<String?> sendTspl(
+    String command, {
+    bool closePort = false,
+    Duration writeTimeout = PrinterLimits.writeTimeout,
+    Duration completionTimeout = PrinterLimits.completionTimeout,
+    String? macAddress,
+    String? pin,
+    String? fallbackPin,
+    Duration? connectTimeout,
+    bool confirmCompletion = true,
+    bool? probe,
+  }) =>
       Future.value('Success');
 
   @override
-  Future<String?> sendRawBytes(Uint8List bytes, {bool closePort = false}) =>
+  Future<String?> sendRawBytes(
+    Uint8List bytes, {
+    bool closePort = false,
+    Duration writeTimeout = PrinterLimits.writeTimeout,
+    Duration completionTimeout = PrinterLimits.completionTimeout,
+    String? macAddress,
+    String? pin,
+    String? fallbackPin,
+    Duration? connectTimeout,
+    bool confirmCompletion = true,
+    bool? probe,
+  }) =>
       Future.value('Success');
 
   @override
   Future<String?> closePort() => Future.value('Success');
 
   @override
-  Future<String?> printPdf(String filePath, PdfPrintOptions options,
-          {int copies = 1, bool closePort = false}) =>
+  Future<void> cancel() => Future.value();
+
+  @override
+  Future<String?> printPdf(
+    String filePath,
+    PdfPrintOptions options, {
+    int copies = 1,
+    bool closePort = false,
+    Duration writeTimeout = PrinterLimits.writeTimeout,
+    Duration completionTimeout = PrinterLimits.completionTimeout,
+    String? macAddress,
+    String? pin,
+    String? fallbackPin,
+    Duration? connectTimeout,
+    bool confirmCompletion = true,
+    bool? probe,
+  }) =>
       Future.value('Success');
 }
 

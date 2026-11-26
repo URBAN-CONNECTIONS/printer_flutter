@@ -1,5 +1,8 @@
 # runtime-permissions
 
+## Purpose
+Requests the Bluetooth runtime permissions of the platform from the plugin, so the app does not have to do it by hand.
+
 ## Requirements
 
 ### Requirement: Native Runtime Permission Request

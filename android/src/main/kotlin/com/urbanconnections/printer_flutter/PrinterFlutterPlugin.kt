@@ -17,10 +17,6 @@ import androidx.annotation.NonNull
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 
-import com.example.tscdll.TSCActivity
-import com.example.tscdll.TSCUSBActivity
-import com.example.tscdll.TscWifiActivity
-
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -29,12 +25,13 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
 import io.flutter.plugin.common.PluginRegistry
+import java.io.File
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
 
 /** PrinterFlutterPlugin */
 class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, PluginRegistry.RequestPermissionsResultListener, PluginRegistry.ActivityResultListener {
   private lateinit var channel : MethodChannel
-  private val tsc = TSCActivity()
   
   private var activity: Activity? = null
   private var permissionResultCallback: Result? = null
@@ -44,14 +41,23 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
   private val BLUETOOTH_ENABLE_REQUEST_CODE = 1002
 
   // Auto-pairing state
-  private var targetMacAddress: String? = null
-  private var currentPin: String = "0000"
-  private var currentFallbackPin: String? = "1234"
+  // MAC, PIN and fallback PIN of the call in progress, kept as one value. Replaced in one write by
+  // openPort (main thread) and by an atomic call (job thread); read once per event by the receiver.
+  private val pairing = PairingCredentials()
   private var receiverRegistered = false
 
-  // Single thread executor to run printer commands off the main thread
+  // Single thread executor to run printer jobs off the main thread, one at a time.
+  // Every blocking step of a job has a limit, so the queue can never stay stuck.
   private val executor = Executors.newSingleThreadExecutor()
+  // Closes the connection of a step that runs past its limit.
+  private val watchdog: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
   private val mainHandler = Handler(Looper.getMainLooper())
+
+  // The connection and the order of open, jobs, close and cancel.
+  private val session = PrinterSession(
+    newConnection = { mac -> PrinterConnection(BluetoothSocketTransport(mac), watchdog) },
+    onWarning = { Log.w("PrinterFlutterPlugin", it) },
+  )
 
   private val pairingReceiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -64,14 +70,16 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
         intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
       }
 
-      if (device == null || targetMacAddress == null) return
-      if (!device.address.equals(targetMacAddress, ignoreCase = true)) return
+      // Another thread can replace the target while the event is handled, so it is read once.
+      val target = pairing.read()
+
+      if (device == null || !target.matches(device.address)) return
 
       if (BluetoothDevice.ACTION_PAIRING_REQUEST == action) {
         val pairingVariant = intent.getIntExtra(BluetoothDevice.EXTRA_PAIRING_VARIANT, BluetoothDevice.ERROR)
         if (pairingVariant == BluetoothDevice.PAIRING_VARIANT_PIN || pairingVariant == 0) {
           try {
-            val pinBytes = currentPin.toByteArray(Charsets.UTF_8)
+            val pinBytes = target.pin.toByteArray(Charsets.UTF_8)
             device.setPin(pinBytes)
             
             try {
@@ -81,7 +89,7 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
             }
             
             abortBroadcast()
-            Log.d("PrinterFlutterPlugin", "Auto-pairing with PIN $currentPin for ${device.address}")
+            Log.d("PrinterFlutterPlugin", "Auto-pairing with the configured PIN")
           } catch (e: Exception) {
             Log.e("PrinterFlutterPlugin", "Failed to auto-pair: ${e.message}")
           }
@@ -93,10 +101,9 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
         if (bondState == BluetoothDevice.BOND_NONE && previousBondState == BluetoothDevice.BOND_BONDING) {
           val reason = intent.getIntExtra("android.bluetooth.device.extra.REASON", -1)
           // 1 is UNBOND_REASON_AUTH_FAILED
-          if (reason == 1 && currentFallbackPin != null && currentPin != currentFallbackPin) {
-            Log.d("PrinterFlutterPlugin", "Pairing failed with $currentPin, trying fallback $currentFallbackPin")
-            currentPin = currentFallbackPin!!
-            currentFallbackPin = null // Only fallback once
+          // Only fallback once, and never over the values of a call that started in the meantime.
+          if (reason == 1 && pairing.switchToFallback(target) != null) {
+            Log.d("PrinterFlutterPlugin", "Pairing failed with the configured PIN, trying the fallback PIN")
             try {
                device.javaClass.getMethod("createBond").invoke(device)
             } catch (e: Exception) {
@@ -126,77 +133,107 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
       }
       "openPort" -> {
         val macAddress = call.argument<String>("macAddress") ?: ""
-        
-        targetMacAddress = macAddress.uppercase()
-        currentPin = call.argument<String>("pin") ?: "0000"
-        currentFallbackPin = call.argument<String>("fallbackPin")
+        val connectTimeoutMs = call.longArgument("connectTimeoutMs", PrinterSession.DEFAULT_CONNECT_TIMEOUT_MS)
+        val resetAfterFailure = call.argument<Boolean>("resetPrinterAfterFailure") ?: false
+
+        pairing.replace(
+          PairingTarget(
+            macAddress = macAddress.uppercase(),
+            pin = call.argument<String>("pin") ?: PairingCredentials.DEFAULT_PIN,
+            fallbackPin = call.argument<String>("fallbackPin"),
+          ),
+        )
 
         executeInBackground(result) {
-          try {
-            // Always attempt to close any existing connection before opening a new one.
-            try { tsc.closeport() } catch (e: Exception) {}
-            
-            val res = tsc.openport(macAddress)
-            if (res == "-1") {
-              try { tsc.closeport() } catch (e: Exception) {}
-            }
-            res
-          } catch (e: Exception) {
-            try { tsc.closeport() } catch (eClose: Exception) {}
-            throw e
-          }
+          session.open(macAddress, connectTimeoutMs, resetAfterFailure)
         }
       }
       "sendTspl" -> {
         val command = call.argument<String>("command") ?: ""
         val closePort = call.argument<Boolean>("closePort") ?: false
-        executeInBackground(result) {
-          tsc.sendcommand(command)
-          if (closePort) {
-            tsc.sendcommand_getstring("OUT \"COMPLETED\\r\\n\"\r\n")
-            try { tsc.closeport() } catch (e: Exception) {}
+        val confirmCompletion = call.argument<Boolean>("confirmCompletion") ?: true
+        // Opt-in in the three-step API; an atomic call resolves its own default in executeAtomic.
+        val probe = call.argument<Boolean>("probe") ?: false
+        val limits = jobLimitsFrom(call)
+        val atomicMac = atomicMacAddress(call)
+        if (atomicMac != null) {
+          // The whole job in one call; closePort has no effect because the call always closes.
+          executeAtomic(call, result, atomicMac) { conn, _ ->
+            conn.write(command.toByteArray(), limits.writeTimeoutMs)
+          }
+        } else {
+          executeInBackground(result) {
+            session.runJob(closePort, limits, confirmCompletion, probe) { conn ->
+              conn.write(command.toByteArray(), limits.writeTimeoutMs)
+            }
           }
         }
       }
       "sendRawBytes" -> {
         val bytes = call.argument<ByteArray>("bytes")
         val closePort = call.argument<Boolean>("closePort") ?: false
-        executeInBackground(result) {
-          if (bytes != null) {
-            tsc.sendcommand(bytes)
-            if (closePort) {
-              tsc.sendcommand_getstring("OUT \"COMPLETED\\r\\n\"\r\n")
-              try { tsc.closeport() } catch (e: Exception) {}
-            }
-            "Success"
-          } else {
-            "No bytes provided"
+        val confirmCompletion = call.argument<Boolean>("confirmCompletion") ?: true
+        // Opt-in in the three-step API; an atomic call resolves its own default in executeAtomic.
+        val probe = call.argument<Boolean>("probe") ?: false
+        val limits = jobLimitsFrom(call)
+        val atomicMac = atomicMacAddress(call)
+        if (bytes == null) {
+          result.error("INVALID_ARGUMENT", "No bytes provided", null)
+        } else if (atomicMac != null) {
+          executeAtomic(call, result, atomicMac) { conn, _ -> conn.write(bytes, limits.writeTimeoutMs) }
+        } else {
+          executeInBackground(result) {
+            session.runJob(closePort, limits, confirmCompletion, probe) { conn -> conn.write(bytes, limits.writeTimeoutMs) }
           }
         }
       }
       "closePort" -> {
-        executeInBackground(result) {
-          try { tsc.closeport() } catch (e: Exception) {}
-        }
+        executeInBackground(result) { session.closePort() }
+      }
+      "cancel" -> {
+        // Runs on the main thread, not on the executor: it must reach a job in progress. It only
+        // sets flags; the socket is closed on the watchdog thread, so this never blocks.
+        session.cancel()
+        result.success("Success")
       }
       "printPdf" -> {
         val filePath = call.argument<String>("filePath") ?: ""
         val options = call.argument<Map<String, Any>>("options") ?: emptyMap()
         val copies = call.argument<Int>("copies") ?: 1
         val closePort = call.argument<Boolean>("closePort") ?: false
-        executeInBackground(result) {
-          PdfPrintHelper.printPdf(
-            filePath = filePath,
-            options = options,
-            copies = copies,
-            sendCommand = { bytes -> tsc.sendcommand(bytes) },
-            sendString = { str -> tsc.sendcommand(str) }
-          )
-          if (closePort) {
-            tsc.sendcommand_getstring("OUT \"COMPLETED\\r\\n\"\r\n")
-            try { tsc.closeport() } catch (e: Exception) {}
+        val confirmCompletion = call.argument<Boolean>("confirmCompletion") ?: true
+        // Opt-in in the three-step API; an atomic call resolves its own default in executeAtomic.
+        val probe = call.argument<Boolean>("probe") ?: false
+        val limits = jobLimitsFrom(call)
+        val atomicMac = atomicMacAddress(call)
+        if (!File(filePath).exists()) {
+          // Known at call time: fail before connecting and probing.
+          result.error("FILE_NOT_FOUND", "PDF file not found at path: $filePath", null)
+        } else if (atomicMac != null) {
+          executeAtomic(call, result, atomicMac) { conn, phases ->
+            PdfPrintHelper.printPdf(
+              filePath = filePath,
+              options = options,
+              copies = copies,
+              sendBlock = { bytes -> conn.writeBlock(bytes, limits.writeTimeoutMs) },
+              sendString = { str -> conn.write(str.toByteArray(), limits.writeTimeoutMs) },
+              checkCancelled = { conn.checkCancelled() },
+              phases = phases
+            )
           }
-          "Success"
+        } else {
+          executeInBackground(result) {
+            session.runJob(closePort, limits, confirmCompletion, probe) { conn ->
+              PdfPrintHelper.printPdf(
+                filePath = filePath,
+                options = options,
+                copies = copies,
+                sendBlock = { bytes -> conn.writeBlock(bytes, limits.writeTimeoutMs) },
+                sendString = { str -> conn.write(str.toByteArray(), limits.writeTimeoutMs) },
+                checkCancelled = { conn.checkCancelled() }
+              )
+            }
+          }
         }
       }
       else -> {
@@ -290,17 +327,66 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
           val value = if (res is Unit || res == null) "Success" else res
           result.success(value)
         }
-      } catch (e: Exception) {
+      } catch (e: PrinterException) {
         mainHandler.post {
-          result.error("PRINTER_ERROR", e.message, null)
+          result.error(e.code.name, e.message, null)
+        }
+      } catch (e: Throwable) {
+        // Catch everything (OutOfMemoryError included) so Flutter always gets an answer.
+        mainHandler.post {
+          result.error("PRINTER_ERROR", e.message ?: e.toString(), null)
         }
       }
     }
   }
 
+  /** The `macAddress` of a print call, or null when the call uses the three-step API. */
+  private fun atomicMacAddress(call: MethodCall): String? =
+    call.argument<String>("macAddress")?.takeIf { it.isNotEmpty() }
+
+  /**
+   * Runs a whole job (connect, send, confirm, close) as one task of the job executor, so atomic
+   * calls run first-in-first-out. The pairing PIN is set when the task starts, not when the call
+   * arrives, so a call waiting in the queue does not change the PIN of the one that is running.
+   * When the call ends, in success or failure, the phase times go to the log in one line that
+   * holds no MAC address and no PIN.
+   */
+  private fun executeAtomic(
+    call: MethodCall,
+    result: Result,
+    macAddress: String,
+    send: (PrinterConnection, PhaseTimer) -> Unit,
+  ) {
+    val connectTimeoutMs = call.longArgument("connectTimeoutMs", PrinterSession.DEFAULT_CONNECT_TIMEOUT_MS)
+    val confirmCompletion = call.argument<Boolean>("confirmCompletion") ?: true
+    val probe = call.argument<Boolean>("probe") ?: true
+    val pin = call.argument<String>("pin") ?: PairingCredentials.DEFAULT_PIN
+    val fallbackPin = call.argument<String>("fallbackPin")
+    val limits = jobLimitsFrom(call)
+    val phases = PhaseTimer()
+
+    executeInBackground(result) {
+      pairing.replace(PairingTarget(macAddress.uppercase(), pin, fallbackPin))
+      try {
+        session.runAtomic(macAddress, connectTimeoutMs, confirmCompletion, limits, phases, probe) { conn ->
+          send(conn, phases)
+        }
+      } finally {
+        Log.i("PrinterFlutterPlugin", phases.formatLine())
+      }
+    }
+  }
+
+  private fun jobLimitsFrom(call: MethodCall) = JobLimits(
+    writeTimeoutMs = call.longArgument("writeTimeoutMs", PrinterSession.DEFAULT_WRITE_TIMEOUT_MS),
+    completionTimeoutMs = call.longArgument("completionTimeoutMs", PrinterSession.DEFAULT_COMPLETION_TIMEOUT_MS),
+  )
+
   override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
     channel.setMethodCallHandler(null)
+    session.shutdown()
     executor.shutdown()
+    watchdog.shutdown()
   }
 
   private fun registerReceiver(context: Context) {
@@ -349,3 +435,7 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
     activity = null
   }
 }
+
+/** Reads a numeric argument sent from Dart as int or long. */
+private fun MethodCall.longArgument(name: String, default: Long): Long =
+  (argument<Any>(name) as? Number)?.toLong() ?: default
