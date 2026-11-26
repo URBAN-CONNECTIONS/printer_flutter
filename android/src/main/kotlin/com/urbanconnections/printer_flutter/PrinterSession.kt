@@ -28,6 +28,8 @@ class PrinterSession(
    * saw. The default does nothing. Tests block here to let the call end and the next one start.
    */
   private val beforeCancel: () -> Unit = {},
+  /** Milliseconds from a monotonic clock, to time the reconnect window. Injectable for tests. */
+  private val clock: () -> Long = { System.nanoTime() / NANOS_PER_MILLI },
 ) {
   /**
    * Guards [busy] and [cancelRequested] so a cancel is decided against one call only: it never
@@ -50,6 +52,9 @@ class PrinterSession(
 
   /** true when [cancel] arrived during the running call, even before it had a connection. */
   @Volatile private var cancelRequested = false
+
+  /** The [clock] time at which the last cancelled call ended; null when no call was cancelled. */
+  @Volatile private var cancelledCallEndedAt: Long? = null
 
   /**
    * Opens the connection within [connectTimeoutMs]. With [resetAfterFailure], when the previous
@@ -127,6 +132,8 @@ class PrinterSession(
    * ends only the call that is running; the flag is reset when each call starts, so a call that
    * was waiting in the queue starts clean.
    *
+   * Right after a cancelled call, a connection that fails is retried, see [openForAtomic].
+   *
    * The time of each phase goes to [phases]. A render measured inside [send] (with
    * [PrintPhase.RENDER]) is taken out of the send phase, so no time is counted twice.
    */
@@ -142,14 +149,7 @@ class PrinterSession(
     closeConnection()
     try {
       throwIfCancelRequested()
-      val opened = phases.measure(PrintPhase.CONNECT) {
-        val fresh = newConnection(macAddress)
-        connection = fresh
-        // A cancel that arrived before the connection was published must still apply.
-        if (cancelRequested) fresh.cancel()
-        fresh.open(connectTimeoutMs)
-        fresh
-      }
+      val opened = phases.measure(PrintPhase.CONNECT) { openForAtomic(macAddress, connectTimeoutMs) }
       phases.measureExcluding(PrintPhase.SEND, PrintPhase.RENDER) { send(opened) }
       phases.measure(PrintPhase.CONFIRM) {
         if (confirmCompletion) {
@@ -207,6 +207,37 @@ class PrinterSession(
   }
 
   /**
+   * Opens the connection of an atomic call. A printer may refuse connections for a moment after a
+   * cancelled call closed its link, so a connection that fails while less than
+   * [RECONNECT_WINDOW_MS] have passed since a cancelled call ended is closed, and after
+   * [RECONNECT_PAUSE_MS] a new one is tried. Any other failure is reported as it is, so an
+   * unreachable printer does not multiply the connect timeout. A [cancel] ends the pause at once.
+   */
+  private fun openForAtomic(macAddress: String, connectTimeoutMs: Long): PrinterConnection {
+    while (true) {
+      // A failed connection is closed for good, so each attempt gets a new one.
+      val fresh = newConnection(macAddress)
+      connection = fresh
+      // A cancel that arrived before the connection was published must still apply.
+      if (cancelRequested) fresh.cancel()
+      try {
+        fresh.open(connectTimeoutMs)
+        return fresh
+      } catch (e: PrinterException) {
+        if (e.code != PrinterErrorCode.NOT_CONNECTED || !isRightAfterACancelledCall()) throw e
+        closeConnection()
+        waitUnlessCancelled(RECONNECT_PAUSE_MS)
+        throwIfCancelRequested()
+      }
+    }
+  }
+
+  private fun isRightAfterACancelledCall(): Boolean {
+    val endedAt = cancelledCallEndedAt ?: return false
+    return clock() - endedAt < RECONNECT_WINDOW_MS
+  }
+
+  /**
    * Sends `<ESC>!R` so a printer left waiting for the rest of an image starts clean.
    * The reset drops the Bluetooth link, so this waits for the printer to come back before the
    * caller reconnects. Failing to reset is not an error: the caller still tries to connect.
@@ -226,10 +257,15 @@ class PrinterSession(
       resetConnection.close()
       connection = null
     }
+    waitUnlessCancelled(resetSettleMs)
+  }
+
+  /** Waits [totalMs] in short slices, so a [cancel] ends the wait with [PrinterErrorCode.CANCELLED]. */
+  private fun waitUnlessCancelled(totalMs: Long) {
     var waited = 0L
-    while (waited < resetSettleMs) {
+    while (waited < totalMs) {
       throwIfCancelRequested()
-      val slice = minOf(SETTLE_SLICE_MS, resetSettleMs - waited)
+      val slice = minOf(WAIT_SLICE_MS, totalMs - waited)
       sleeper(slice)
       waited += slice
     }
@@ -253,7 +289,10 @@ class PrinterSession(
     try {
       return block()
     } finally {
-      synchronized(lock) { busy = false }
+      synchronized(lock) {
+        busy = false
+        if (cancelRequested) cancelledCallEndedAt = clock()
+      }
     }
   }
 
@@ -263,7 +302,10 @@ class PrinterSession(
     const val DEFAULT_COMPLETION_TIMEOUT_MS = 60_000L
     const val CLOSE_GRACE_MS = 1_500L
     const val RESET_SETTLE_MS = 4_000L
-    private const val SETTLE_SLICE_MS = 100L
+    private const val RECONNECT_WINDOW_MS = 5_000L
+    private const val RECONNECT_PAUSE_MS = 500L
+    private const val WAIT_SLICE_MS = 100L
+    private const val NANOS_PER_MILLI = 1_000_000L
 
     /** Same bytes the TSC SDK sent: an `OUT` marker plus the `ENDLINE` its reader waited for. */
     val COMPLETION_REQUEST: ByteArray =

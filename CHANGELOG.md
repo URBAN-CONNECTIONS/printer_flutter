@@ -1,6 +1,7 @@
 ## Unreleased
 
 * Added an atomic print call: pass the optional `macAddress` (and `pin`, `fallbackPin`, `connectTimeout`) to `printPdf`, `sendTspl` or `sendRawBytes` and the plugin connects, sends, confirms and closes in one native call. Atomic calls run first in, first out, take over a connection left open by `openPort`, and ignore `closePort`. The three-step API (`openPort`, send, `closePort`) is unchanged.
+* Fixed: a queued atomic call could fail with `notConnected` when it connected right after a cancelled one, because the printer refused connections for a moment. For 5 s after a cancelled call, an atomic call now retries a failed connection about every 500 ms.
 * Added `confirmCompletion` (default `true`) to `printPdf`, `sendTspl` and `sendRawBytes`. With `false` the call does not wait for the printer's `OUT` answer; it returns after sending the bytes and closing the connection.
 * A timeout after everything was sent now documents as "not confirmed": the printer may still have printed.
 * Android logs the milliseconds of the connect, render, send and confirm phases of each atomic call (`adb logcat -s PrinterFlutterPlugin:I`).

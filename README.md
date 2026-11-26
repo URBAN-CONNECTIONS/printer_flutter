@@ -154,6 +154,7 @@ try {
 - **Do not mix the two styles** (`openPort`, send, `closePort`) on the same printer.
 - `closePort: true` has no effect when `macAddress` is set; the call always closes the connection.
 - `cancel()` ends only the call that is running. Calls still waiting in the queue run afterwards.
+- A printer may refuse connections for a moment after a cancelled call closed its link, so an atomic call started right after a cancelled one may retry its connection for up to 5 s, about every 500 ms. Each attempt has its own `connectTimeout`. If the printer still does not accept it, the call fails with `PrinterErrorType.notConnected`; `cancel()` also ends the wait. At any other time the connection is attempted once.
 - Without `macAddress` the three-step API works exactly as before.
 
 ### Completion confirmation

@@ -12,6 +12,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 import kotlin.test.AfterTest
@@ -44,6 +45,7 @@ class PrinterSessionTest {
     closeGraceMs: Long = 0,
     onCancelWindow: () -> Unit = {},
     beforeCancel: () -> Unit = {},
+    clock: () -> Long = { 0L },
     configure: (FakeTransport) -> Unit = {},
   ) = PrinterSession(
     newConnection = {
@@ -57,7 +59,25 @@ class PrinterSessionTest {
     closeGraceMs = closeGraceMs,
     onCancelWindow = onCancelWindow,
     beforeCancel = beforeCancel,
+    clock = clock,
   )
+
+  private fun PrinterSession.atomicJob(
+    phases: PhaseTimer = PhaseTimer(),
+    send: (PrinterConnection) -> Unit = { it.write("JOB".toByteArray(), 1_000) },
+  ) = runAtomic("AA:BB", 1_000, confirmCompletion = true, limits = limits, phases = phases, send = send)
+
+  /** Runs an atomic call that is cancelled while it sends; [beforeItEnds] runs after the cancel. */
+  private fun PrinterSession.cancelledAtomicJob(beforeItEnds: () -> Unit = {}) {
+    val error = assertFailsWith<PrinterException> {
+      atomicJob {
+        cancel()
+        beforeItEnds()
+        it.write("CUT".toByteArray(), 1_000)
+      }
+    }
+    assertEquals(PrinterErrorCode.CANCELLED, error.code)
+  }
 
   @Test
   fun runJob_withoutAnOpenConnectionFailsWithNotConnected() {
@@ -731,6 +751,172 @@ class PrinterSessionTest {
       releaseCancel.countDown()
       executor.shutdownNow()
     }
+  }
+
+  @Test
+  fun runAtomic_aQueuedCallRetriesWhileThePrinterRefusesRightAfterACancelAndSucceeds() {
+    // Like the RT-320 PB: for a moment after the cancelled link is closed it refuses connections.
+    val now = AtomicLong(0)
+    val slept = Collections.synchronizedList(mutableListOf<Long>())
+    val session = session(
+      sleeper = {
+        slept.add(it)
+        now.addAndGet(it)
+      },
+      clock = { now.get() },
+    ) {
+      if (transports.isEmpty()) {
+        it.blockWrites = true
+      } else {
+        it.failConnect = now.get() < 1_200
+        it.autoReply = true
+      }
+    }
+    val executor = Executors.newSingleThreadExecutor()
+    try {
+      val started = CountDownLatch(1)
+      val first = executor.submit<String> {
+        session.atomicJob {
+          started.countDown()
+          it.write("A".toByteArray(), 5_000)
+        }
+      }
+      assertTrue(started.await(2, TimeUnit.SECONDS))
+      val phases = PhaseTimer { now.get() }
+      val second = executor.submit<String> { session.atomicJob(phases) }
+
+      session.cancel()
+
+      val cancelled = assertFailsWith<ExecutionException> { first.get(3, TimeUnit.SECONDS) }
+      assertEquals(PrinterErrorCode.CANCELLED, (cancelled.cause as PrinterException).code)
+      assertEquals("Success", second.get(3, TimeUnit.SECONDS))
+
+      // The cancelled call, three refused attempts (0, 500, 1000 ms) and the one that connects.
+      assertEquals(5, transports.size)
+      assertTrue(transports.all { it.closed })
+      assertTrue(transports.subList(1, 4).all { it.written.size() == 0 })
+      assertContentEquals(
+        "JOB".toByteArray() + PrinterSession.COMPLETION_REQUEST,
+        transports.last().written.toByteArray(),
+      )
+      assertEquals(1_500, slept.sum())
+      assertTrue(slept.all { it <= 100 }) // in slices, so a cancel ends the wait
+      assertEquals(1_500, phases.millis(PrintPhase.CONNECT)) // the retries are part of connect
+    } finally {
+      executor.shutdownNow()
+    }
+  }
+
+  @Test
+  fun runAtomic_afterACancelAnUnreachablePrinterIsRetriedUntilTheWindowEndsThenFailsNotConnected() {
+    var now = 0L
+    var refuse = false
+    val session = session(sleeper = { now += it }, clock = { now }) { it.failConnect = refuse }
+    session.cancelledAtomicJob()
+    refuse = true
+
+    val error = assertFailsWith<PrinterException> { session.atomicJob() }
+
+    assertEquals(PrinterErrorCode.NOT_CONNECTED, error.code)
+    assertEquals(5_000, now)
+    assertEquals(1 + 11, transports.size) // one attempt every 500 ms from 0 to 5000 ms
+    assertTrue(transports.all { it.closed })
+  }
+
+  @Test
+  fun runAtomic_theRetryWindowStartsWhenTheCancelledCallEnds() {
+    var now = 0L
+    var refuse = false
+    val session = session(sleeper = { now += it }, clock = { now }) {
+      it.failConnect = refuse && now < 10_500
+      it.autoReply = true
+    }
+    // The call takes 10 s to end after the cancel; the window counts from its end.
+    session.cancelledAtomicJob { now += 10_000 }
+    refuse = true
+
+    assertEquals("Success", session.atomicJob())
+    assertEquals(3, transports.size)
+  }
+
+  @Test
+  fun runAtomic_aFailureAfterTheRetryWindowIsAttemptedOnce() {
+    var now = 0L
+    var refuse = false
+    var attemptTakesMs = 0L
+    val slept = mutableListOf<Long>()
+    val session = session(sleeper = { slept.add(it) }, clock = { now }) {
+      now += attemptTakesMs
+      it.failConnect = refuse
+    }
+    session.cancelledAtomicJob()
+    refuse = true
+    // The call starts inside the window, but its connect fails after it.
+    attemptTakesMs = 5_000
+
+    val error = assertFailsWith<PrinterException> { session.atomicJob() }
+
+    assertEquals(PrinterErrorCode.NOT_CONNECTED, error.code)
+    assertEquals(2, transports.size)
+    assertTrue(transports.all { it.closed })
+    assertTrue(slept.isEmpty())
+  }
+
+  @Test
+  fun runAtomic_withoutACancelledCallAFailedConnectionIsAttemptedOnce() {
+    var refuse = false
+    val slept = mutableListOf<Long>()
+    val session = session(sleeper = { slept.add(it) }) { it.failConnect = refuse }
+    session.cancel() // nothing runs: no call was cancelled
+    // A call that fails for another reason (no confirmation) opens no retry window.
+    val timeout = assertFailsWith<PrinterException> { session.atomicJob() }
+    assertEquals(PrinterErrorCode.TIMEOUT, timeout.code)
+    refuse = true
+
+    val error = assertFailsWith<PrinterException> { session.atomicJob() }
+
+    assertEquals(PrinterErrorCode.NOT_CONNECTED, error.code)
+    assertEquals(2, transports.size)
+    assertTrue(slept.isEmpty())
+  }
+
+  @Test
+  fun runAtomic_aCancelDuringTheRetryWaitEndsItWithCancelled() {
+    lateinit var session: PrinterSession
+    var refuse = false
+    var sleeps = 0
+    var sent = false
+    session = session(sleeper = {
+      sleeps++
+      session.cancel()
+    }) { it.failConnect = refuse }
+    session.cancelledAtomicJob()
+    refuse = true
+
+    val error = assertFailsWith<PrinterException> { session.atomicJob { sent = true } }
+
+    assertEquals(PrinterErrorCode.CANCELLED, error.code)
+    assertEquals(1, sleeps) // the wait ended at once
+    assertEquals(2, transports.size) // no new connection after the cancel
+    assertTrue(transports.all { it.closed })
+    assertFalse(sent)
+  }
+
+  @Test
+  fun open_rightAfterACancelledCallIsStillAttemptedOnce() {
+    var refuse = false
+    val slept = mutableListOf<Long>()
+    val session = session(sleeper = { slept.add(it) }) { it.failConnect = refuse }
+    session.cancelledAtomicJob()
+    refuse = true
+
+    val error = assertFailsWith<PrinterException> {
+      session.open("AA:BB", 1_000, resetAfterFailure = false)
+    }
+
+    assertEquals(PrinterErrorCode.NOT_CONNECTED, error.code)
+    assertEquals(2, transports.size)
+    assertTrue(slept.isEmpty())
   }
 
   @Test

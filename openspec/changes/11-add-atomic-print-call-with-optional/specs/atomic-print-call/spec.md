@@ -34,13 +34,19 @@ Atomic calls SHALL run one at a time in arrival order, each on its own connectio
 - **THEN** the plugin closes that connection and the atomic call takes over
 
 ### Requirement: Cancel affects only the running call
-`cancel()` SHALL end only the atomic call that is running with `PrinterErrorType.cancelled`; calls waiting in the queue SHALL still run.
+`cancel()` SHALL end only the atomic call that is running with `PrinterErrorType.cancelled`; calls waiting in the queue SHALL still run. A printer may refuse connections for a moment after a cancelled call closed its link, so an atomic call whose connection fails within 5 s of a cancelled call ending SHALL retry the connection about every 500 ms until that window ends, then fail with `PrinterErrorType.notConnected`. A `cancel()` during the wait SHALL end that call with `PrinterErrorType.cancelled`. Without a recently cancelled call the connection SHALL be attempted once.
 
 #### Scenario: Cancel during an atomic call
 - **GIVEN** an atomic call is running and others wait in the queue
 - **WHEN** `cancel()` is called
 - **THEN** only the running call ends with `PrinterErrorType.cancelled`
 - **AND** the calls waiting in the queue still run
+
+#### Scenario: Queued call connects right after a cancelled one
+- **GIVEN** an atomic call is cancelled while another waits in the queue, and the printer refuses connections for a moment after the cancel
+- **WHEN** the queued call starts
+- **THEN** it retries the connection and completes with `Success`
+- **AND** it does not fail with `PrinterErrorType.notConnected` because of the cancelled call
 
 ### Requirement: Cancel aimed at one call never hits the next
 `cancel()` SHALL act on the call that was running when it was called; if that call ended and the next queued call started in the meantime, the next call SHALL NOT be cancelled.

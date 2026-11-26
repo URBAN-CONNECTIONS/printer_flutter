@@ -29,3 +29,9 @@
 - [x] 5.2 In PrinterFlutterPlugin's pairing receiver read targetMacAddress, currentPin and currentFallbackPin once into local vals per event (no `!!` on a field another thread can change), keep the existing behaviour otherwise, and say how it was verified since it needs the Android SDK (read-through plus the manual pairing check on the RT-320 PB) (device only)
 - [x] 5.3 Fix the D16 documentation: in lib/printer_flutter.dart printPdf `///` say the printer must confirm it processed everything it was sent (not that it printed it), and in README.md drop 'includes printing every copy' from the completionTimeout row; verify with grep that no README, `///` or PrinterLimits text says the confirmation means printing finished
 - [x] 5.4 Test: add a Dart test that reads lib/printer_flutter.dart and README.md and fails when they say the confirmation arrives after printing (for example the phrases 'printed everything' or 'includes printing every copy'); verify flutter test passes
+
+## 6. Review corrections [Iteration 2]
+
+- [x] 6.1 Test: in PrinterSessionTest use a fake transport that refuses connections for a moment after a cancelled runAtomic, with an injected clock and sleeper: the next queued runAtomic ends Success; a failure after the 5 s window or with no previous cancel is attempted once and ends NOT_CONNECTED; a cancel during the retry wait ends CANCELLED; the success case fails without the fix
+- [x] 6.2 In PrinterSession.runAtomic retry the connection about every 500 ms while a cancelled call ended less than 5 s ago, closing each failed connection, and keep the three-step API and every default unchanged
+- [x] 6.3 State in README.md that an atomic call started right after a cancelled one may retry its connection for up to 5 s, and add the fix to the Unreleased entry of CHANGELOG.md
