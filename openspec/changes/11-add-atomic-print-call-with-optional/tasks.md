@@ -14,8 +14,8 @@
 
 ## 3. Dart API
 
-- [ ] 3.1 Add optional `macAddress`, `pin`, `fallbackPin`, `connectTimeout` and `confirmCompletion` to `printPdf`, `sendTspl` and `sendRawBytes` in `lib/printer_flutter.dart`, `lib/printer_flutter_platform_interface.dart` and `lib/printer_flutter_method_channel.dart`, with `///` comments (including the "not confirmed" meaning of a timeout, D16), sending the new keys only when set; verify `flutter analyze` is clean.
-- [ ] 3.2 Add channel tests in `test/` for the new arguments (atomic map keys, defaults omitted when unset, `confirmCompletion` false, `closePort` unaffected) and that calls without `macAddress` send the same map as before; verify `flutter test` passes.
+- [x] 3.1 Add optional `macAddress`, `pin`, `fallbackPin`, `connectTimeout` and `confirmCompletion` to `printPdf`, `sendTspl` and `sendRawBytes` in `lib/printer_flutter.dart`, `lib/printer_flutter_platform_interface.dart` and `lib/printer_flutter_method_channel.dart`, with `///` comments (including the "not confirmed" meaning of a timeout, D16), sending the new keys only when set; verify `flutter analyze` is clean.
+- [x] 3.2 Add channel tests in `test/` for the new arguments (atomic map keys, defaults omitted when unset, `confirmCompletion` false, `closePort` unaffected) and that calls without `macAddress` send the same map as before; verify `flutter test` passes.
 
 ## 4. Documentation
 

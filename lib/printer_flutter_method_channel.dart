@@ -53,12 +53,24 @@ class MethodChannelPrinterFlutter extends PrinterFlutterPlatform {
     bool closePort = false,
     Duration writeTimeout = PrinterLimits.writeTimeout,
     Duration completionTimeout = PrinterLimits.completionTimeout,
+    String? macAddress,
+    String? pin,
+    String? fallbackPin,
+    Duration? connectTimeout,
+    bool confirmCompletion = true,
   }) {
     return _invoke<String>('sendTspl', {
       'command': command,
       'closePort': closePort,
       'writeTimeoutMs': writeTimeout.inMilliseconds,
       'completionTimeoutMs': completionTimeout.inMilliseconds,
+      ..._atomicArguments(
+        macAddress: macAddress,
+        pin: pin,
+        fallbackPin: fallbackPin,
+        connectTimeout: connectTimeout,
+        confirmCompletion: confirmCompletion,
+      ),
     });
   }
 
@@ -68,12 +80,24 @@ class MethodChannelPrinterFlutter extends PrinterFlutterPlatform {
     bool closePort = false,
     Duration writeTimeout = PrinterLimits.writeTimeout,
     Duration completionTimeout = PrinterLimits.completionTimeout,
+    String? macAddress,
+    String? pin,
+    String? fallbackPin,
+    Duration? connectTimeout,
+    bool confirmCompletion = true,
   }) {
     return _invoke<String>('sendRawBytes', {
       'bytes': bytes,
       'closePort': closePort,
       'writeTimeoutMs': writeTimeout.inMilliseconds,
       'completionTimeoutMs': completionTimeout.inMilliseconds,
+      ..._atomicArguments(
+        macAddress: macAddress,
+        pin: pin,
+        fallbackPin: fallbackPin,
+        connectTimeout: connectTimeout,
+        confirmCompletion: confirmCompletion,
+      ),
     });
   }
 
@@ -91,6 +115,11 @@ class MethodChannelPrinterFlutter extends PrinterFlutterPlatform {
     bool closePort = false,
     Duration writeTimeout = PrinterLimits.writeTimeout,
     Duration completionTimeout = PrinterLimits.completionTimeout,
+    String? macAddress,
+    String? pin,
+    String? fallbackPin,
+    Duration? connectTimeout,
+    bool confirmCompletion = true,
   }) {
     return _invoke<String>('printPdf', {
       'filePath': filePath,
@@ -99,7 +128,33 @@ class MethodChannelPrinterFlutter extends PrinterFlutterPlatform {
       'closePort': closePort,
       'writeTimeoutMs': writeTimeout.inMilliseconds,
       'completionTimeoutMs': completionTimeout.inMilliseconds,
+      ..._atomicArguments(
+        macAddress: macAddress,
+        pin: pin,
+        fallbackPin: fallbackPin,
+        connectTimeout: connectTimeout,
+        confirmCompletion: confirmCompletion,
+      ),
     });
+  }
+
+  /// The arguments of the atomic print call, only those that were set, so the
+  /// map of a call without [macAddress] is the one it always was.
+  Map<String, dynamic> _atomicArguments({
+    String? macAddress,
+    String? pin,
+    String? fallbackPin,
+    Duration? connectTimeout,
+    bool confirmCompletion = true,
+  }) {
+    return {
+      if (macAddress != null) 'macAddress': macAddress,
+      if (pin != null) 'pin': pin,
+      if (fallbackPin != null) 'fallbackPin': fallbackPin,
+      if (connectTimeout != null)
+        'connectTimeoutMs': connectTimeout.inMilliseconds,
+      if (!confirmCompletion) 'confirmCompletion': false,
+    };
   }
 
   /// Invokes [method] and turns native errors into [PrinterException].

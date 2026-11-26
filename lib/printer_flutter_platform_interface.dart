@@ -60,11 +60,23 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
   ///
   /// Each chunk must be accepted within [writeTimeout]. With [closePort], waits
   /// up to [completionTimeout] for the printer to confirm, then closes the port.
+  ///
+  /// With [macAddress] the call is atomic: it opens the connection (using [pin],
+  /// [fallbackPin] and [connectTimeout] like `openPort`), sends, confirms and
+  /// closes it, and [closePort] has no effect. Atomic calls queue first-in,
+  /// first-out; do not mix them with `openPort`. With [confirmCompletion] false
+  /// the call does not wait for the printer's confirmation. A timeout after
+  /// everything was sent means "not confirmed", not "it did not print".
   Future<String?> sendTspl(
     String command, {
     bool closePort = false,
     Duration writeTimeout = PrinterLimits.writeTimeout,
     Duration completionTimeout = PrinterLimits.completionTimeout,
+    String? macAddress,
+    String? pin,
+    String? fallbackPin,
+    Duration? connectTimeout,
+    bool confirmCompletion = true,
   }) {
     throw UnimplementedError('sendTspl() has not been implemented.');
   }
@@ -73,11 +85,23 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
   ///
   /// Each chunk must be accepted within [writeTimeout]. With [closePort], waits
   /// up to [completionTimeout] for the printer to confirm, then closes the port.
+  ///
+  /// With [macAddress] the call is atomic: it opens the connection (using [pin],
+  /// [fallbackPin] and [connectTimeout] like `openPort`), sends, confirms and
+  /// closes it, and [closePort] has no effect. Atomic calls queue first-in,
+  /// first-out; do not mix them with `openPort`. With [confirmCompletion] false
+  /// the call does not wait for the printer's confirmation. A timeout after
+  /// everything was sent means "not confirmed", not "it did not print".
   Future<String?> sendRawBytes(
     Uint8List bytes, {
     bool closePort = false,
     Duration writeTimeout = PrinterLimits.writeTimeout,
     Duration completionTimeout = PrinterLimits.completionTimeout,
+    String? macAddress,
+    String? pin,
+    String? fallbackPin,
+    Duration? connectTimeout,
+    bool confirmCompletion = true,
   }) {
     throw UnimplementedError('sendRawBytes() has not been implemented.');
   }
@@ -97,6 +121,13 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
   ///
   /// Each chunk must be accepted within [writeTimeout]. With [closePort], the
   /// printer must confirm within [completionTimeout], counted from the last byte.
+  ///
+  /// With [macAddress] the call is atomic: it opens the connection (using [pin],
+  /// [fallbackPin] and [connectTimeout] like `openPort`), sends, confirms and
+  /// closes it, and [closePort] has no effect. Atomic calls queue first-in,
+  /// first-out; do not mix them with `openPort`. With [confirmCompletion] false
+  /// the call does not wait for the printer's confirmation. A timeout after
+  /// everything was sent means "not confirmed", not "it did not print".
   Future<String?> printPdf(
     String filePath,
     PdfPrintOptions options, {
@@ -104,6 +135,11 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
     bool closePort = false,
     Duration writeTimeout = PrinterLimits.writeTimeout,
     Duration completionTimeout = PrinterLimits.completionTimeout,
+    String? macAddress,
+    String? pin,
+    String? fallbackPin,
+    Duration? connectTimeout,
+    bool confirmCompletion = true,
   }) {
     throw UnimplementedError('printPdf() has not been implemented.');
   }

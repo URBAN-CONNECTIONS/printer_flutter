@@ -33,6 +33,11 @@ class MockPrinterFlutterPlatform
     bool closePort = false,
     Duration writeTimeout = PrinterLimits.writeTimeout,
     Duration completionTimeout = PrinterLimits.completionTimeout,
+    String? macAddress,
+    String? pin,
+    String? fallbackPin,
+    Duration? connectTimeout,
+    bool confirmCompletion = true,
   }) =>
       Future.value('Success');
 
@@ -42,6 +47,11 @@ class MockPrinterFlutterPlatform
     bool closePort = false,
     Duration writeTimeout = PrinterLimits.writeTimeout,
     Duration completionTimeout = PrinterLimits.completionTimeout,
+    String? macAddress,
+    String? pin,
+    String? fallbackPin,
+    Duration? connectTimeout,
+    bool confirmCompletion = true,
   }) =>
       Future.value('Success');
 
@@ -59,6 +69,11 @@ class MockPrinterFlutterPlatform
     bool closePort = false,
     Duration writeTimeout = PrinterLimits.writeTimeout,
     Duration completionTimeout = PrinterLimits.completionTimeout,
+    String? macAddress,
+    String? pin,
+    String? fallbackPin,
+    Duration? connectTimeout,
+    bool confirmCompletion = true,
   }) =>
       Future.value('Success');
 }

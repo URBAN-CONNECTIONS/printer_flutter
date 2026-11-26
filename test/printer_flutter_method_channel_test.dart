@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:printer_flutter/printer_flutter.dart';
 import 'package:printer_flutter/printer_flutter_method_channel.dart';
+import 'package:printer_flutter/printer_flutter_platform_interface.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -84,6 +85,146 @@ void main() {
     test('cancel invokes the native cancel', () async {
       await platform.cancel();
       expect(log.single.method, 'cancel');
+    });
+  });
+
+  group('atomic call', () {
+    const testMac = '00:00:00:00:00:00';
+    late List<MethodCall> log;
+
+    setUp(() {
+      log = [];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+        log.add(methodCall);
+        return 'Success';
+      });
+    });
+
+    Map<Object?, Object?> sentArguments() =>
+        log.single.arguments as Map<Object?, Object?>;
+
+    test('printPdf sends the atomic keys that were set', () async {
+      await platform.printPdf(
+        'file.pdf',
+        const PdfPrintOptions(),
+        macAddress: testMac,
+        pin: '1111',
+        fallbackPin: '2222',
+        connectTimeout: const Duration(seconds: 7),
+      );
+      final arguments = sentArguments();
+      expect(arguments['macAddress'], testMac);
+      expect(arguments['pin'], '1111');
+      expect(arguments['fallbackPin'], '2222');
+      expect(arguments['connectTimeoutMs'], 7000);
+      expect(arguments.containsKey('confirmCompletion'), isFalse);
+    });
+
+    test('sendTspl sends the atomic keys that were set', () async {
+      await platform.sendTspl(
+        'TEXT',
+        macAddress: testMac,
+        pin: '1111',
+        fallbackPin: '2222',
+        connectTimeout: const Duration(seconds: 7),
+      );
+      final arguments = sentArguments();
+      expect(log.single.method, 'sendTspl');
+      expect(arguments['macAddress'], testMac);
+      expect(arguments['pin'], '1111');
+      expect(arguments['fallbackPin'], '2222');
+      expect(arguments['connectTimeoutMs'], 7000);
+    });
+
+    test('sendRawBytes sends the atomic keys that were set', () async {
+      await platform.sendRawBytes(
+        Uint8List.fromList([1, 2, 3]),
+        macAddress: testMac,
+        pin: '1111',
+        fallbackPin: '2222',
+        connectTimeout: const Duration(seconds: 7),
+      );
+      final arguments = sentArguments();
+      expect(log.single.method, 'sendRawBytes');
+      expect(arguments['macAddress'], testMac);
+      expect(arguments['pin'], '1111');
+      expect(arguments['fallbackPin'], '2222');
+      expect(arguments['connectTimeoutMs'], 7000);
+    });
+
+    test('only macAddress is sent when the other options are unset', () async {
+      await platform.sendTspl('TEXT', macAddress: testMac);
+      final arguments = sentArguments();
+      expect(arguments['macAddress'], testMac);
+      expect(arguments.containsKey('pin'), isFalse);
+      expect(arguments.containsKey('fallbackPin'), isFalse);
+      expect(arguments.containsKey('connectTimeoutMs'), isFalse);
+      expect(arguments.containsKey('confirmCompletion'), isFalse);
+    });
+
+    test('confirmCompletion false is sent on every print call', () async {
+      await platform.printPdf('file.pdf', const PdfPrintOptions(),
+          macAddress: testMac, confirmCompletion: false);
+      await platform.sendTspl('TEXT',
+          macAddress: testMac, confirmCompletion: false);
+      await platform.sendRawBytes(Uint8List(0),
+          macAddress: testMac, confirmCompletion: false);
+      expect(log, hasLength(3));
+      for (final call in log) {
+        expect((call.arguments as Map)['confirmCompletion'], false);
+      }
+    });
+
+    test('closePort is still sent with the atomic call', () async {
+      await platform.sendTspl('TEXT', macAddress: testMac, closePort: true);
+      expect(sentArguments()['closePort'], true);
+    });
+
+    test('calls without macAddress send the map they always sent', () async {
+      await platform.sendTspl('TEXT', closePort: true);
+      await platform.sendRawBytes(Uint8List.fromList([9]));
+      await platform.printPdf('file.pdf', const PdfPrintOptions(), copies: 2);
+      expect(log[0].arguments, {
+        'command': 'TEXT',
+        'closePort': true,
+        'writeTimeoutMs': 20000,
+        'completionTimeoutMs': 60000,
+      });
+      expect(log[1].arguments, {
+        'bytes': Uint8List.fromList([9]),
+        'closePort': false,
+        'writeTimeoutMs': 20000,
+        'completionTimeoutMs': 60000,
+      });
+      expect(log[2].arguments, {
+        'filePath': 'file.pdf',
+        'options': const PdfPrintOptions().toMap(),
+        'copies': 2,
+        'closePort': false,
+        'writeTimeoutMs': 20000,
+        'completionTimeoutMs': 60000,
+      });
+    });
+
+    test('PrinterFlutter forwards the atomic options to the platform',
+        () async {
+      final previous = PrinterFlutterPlatform.instance;
+      PrinterFlutterPlatform.instance = platform;
+      addTearDown(() => PrinterFlutterPlatform.instance = previous);
+
+      await PrinterFlutter().sendTspl(
+        'TEXT',
+        macAddress: testMac,
+        pin: '1111',
+        connectTimeout: const Duration(seconds: 3),
+        confirmCompletion: false,
+      );
+      final arguments = sentArguments();
+      expect(arguments['macAddress'], testMac);
+      expect(arguments['pin'], '1111');
+      expect(arguments['connectTimeoutMs'], 3000);
+      expect(arguments['confirmCompletion'], false);
     });
   });
 
