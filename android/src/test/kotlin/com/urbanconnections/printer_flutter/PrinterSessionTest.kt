@@ -4,8 +4,10 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.util.Collections
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
@@ -38,6 +40,7 @@ class PrinterSessionTest {
 
   private fun session(
     sleeper: (Long) -> Unit = {},
+    closeGraceMs: Long = 0,
     configure: (FakeTransport) -> Unit = {},
   ) = PrinterSession(
     newConnection = {
@@ -48,7 +51,7 @@ class PrinterSessionTest {
     },
     sleeper = sleeper,
     resetSettleMs = 300,
-    closeGraceMs = 0,
+    closeGraceMs = closeGraceMs,
   )
 
   @Test
@@ -76,6 +79,55 @@ class PrinterSessionTest {
       transport.written.toByteArray(),
     )
     assertTrue(transport.closed)
+  }
+
+  @Test
+  fun runJob_withClosePortAndNoConfirmationWaitsTheGraceTimeThenCloses() {
+    val slept = mutableListOf<Long>()
+    val session = session(sleeper = { slept.add(it) }, closeGraceMs = PrinterSession.CLOSE_GRACE_MS)
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+
+    val result = session.runJob(closePort = true, limits = limits, confirmCompletion = false) {
+      it.write("JOB".toByteArray(), 1_000)
+    }
+
+    assertEquals("Success", result)
+    assertEquals(listOf(PrinterSession.CLOSE_GRACE_MS), slept)
+    val transport = transports.single()
+    assertContentEquals("JOB".toByteArray(), transport.written.toByteArray()) // no completion request
+    assertTrue(transport.closed)
+  }
+
+  @Test
+  fun runJob_withClosePortByDefaultConfirmsAndDoesNotSleep() {
+    val slept = mutableListOf<Long>()
+    val session = session(sleeper = { slept.add(it) }, closeGraceMs = PrinterSession.CLOSE_GRACE_MS) {
+      it.autoReply = true
+    }
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+
+    session.runJob(closePort = true, limits = limits) { it.write("JOB".toByteArray(), 1_000) }
+
+    assertTrue(slept.isEmpty())
+    assertContentEquals(
+      "JOB".toByteArray() + PrinterSession.COMPLETION_REQUEST,
+      transports.single().written.toByteArray(),
+    )
+    assertTrue(transports.single().closed)
+  }
+
+  @Test
+  fun runJob_withoutClosePortIgnoresConfirmCompletion() {
+    val slept = mutableListOf<Long>()
+    val session = session(sleeper = { slept.add(it) })
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+
+    session.runJob(closePort = false, limits = limits, confirmCompletion = false) {
+      it.write("JOB".toByteArray(), 1_000)
+    }
+
+    assertTrue(slept.isEmpty())
+    assertFalse(transports.single().closed)
   }
 
   @Test
@@ -242,6 +294,237 @@ class PrinterSessionTest {
     assertEquals(PrinterErrorCode.CANCELLED, error.code)
     assertEquals(1, sleeps) // the wait ended at once
     assertEquals(before + 1, transports.size) // the reset link only, no new connection
+  }
+
+  @Test
+  fun runAtomic_confirmingWritesTheJobAndTheRequestWaitsForTheMarkerAndCloses() {
+    val session = session { it.autoReply = true }
+
+    val result = session.runAtomic("AA:BB", 1_000, confirmCompletion = true, limits = limits, phases = PhaseTimer()) {
+      it.write("JOB".toByteArray(), 1_000)
+    }
+
+    assertEquals("Success", result)
+    val transport = transports.single()
+    assertContentEquals(
+      "JOB".toByteArray() + PrinterSession.COMPLETION_REQUEST,
+      transport.written.toByteArray(),
+    )
+    assertTrue(transport.closed)
+  }
+
+  @Test
+  fun runAtomic_withoutConfirmationSkipsTheMarkerWaitsTheGraceTimeAndCloses() {
+    val slept = mutableListOf<Long>()
+    val session = session(sleeper = { slept.add(it) }, closeGraceMs = PrinterSession.CLOSE_GRACE_MS)
+
+    val result = session.runAtomic("AA:BB", 1_000, confirmCompletion = false, limits = limits, phases = PhaseTimer()) {
+      it.write("JOB".toByteArray(), 1_000)
+    }
+
+    assertEquals("Success", result)
+    assertEquals(listOf(PrinterSession.CLOSE_GRACE_MS), slept)
+    val transport = transports.single()
+    assertContentEquals("JOB".toByteArray(), transport.written.toByteArray()) // no completion request
+    assertTrue(transport.closed)
+  }
+
+  @Test
+  fun runAtomic_whenTheConnectionCannotBeOpenedFailsWithNotConnectedAndLeavesNothingOpen() {
+    var sent = false
+    val session = session { it.failConnect = true }
+
+    val error = assertFailsWith<PrinterException> {
+      session.runAtomic("AA:BB", 1_000, confirmCompletion = true, limits = limits, phases = PhaseTimer()) { sent = true }
+    }
+
+    assertEquals(PrinterErrorCode.NOT_CONNECTED, error.code)
+    assertFalse(sent)
+    assertTrue(transports.single().closed)
+    // Nothing is left open: a job on the manual connection fails fast.
+    val notConnected = assertFailsWith<PrinterException> {
+      session.runJob(closePort = false, limits = limits) { it.write("x".toByteArray(), 1_000) }
+    }
+    assertEquals(PrinterErrorCode.NOT_CONNECTED, notConnected.code)
+  }
+
+  @Test
+  fun runAtomic_whenTheMarkerNeverArrivesFailsWithTimeoutAfterSendingEverythingAndCloses() {
+    val session = session()
+
+    val error = assertFailsWith<PrinterException> {
+      session.runAtomic("AA:BB", 1_000, confirmCompletion = true, limits = limits, phases = PhaseTimer()) {
+        it.write("JOB".toByteArray(), 1_000)
+      }
+    }
+
+    assertEquals(PrinterErrorCode.TIMEOUT, error.code)
+    val transport = transports.single()
+    assertContentEquals(
+      "JOB".toByteArray() + PrinterSession.COMPLETION_REQUEST,
+      transport.written.toByteArray(),
+    )
+    assertTrue(transport.closed)
+  }
+
+  @Test
+  fun runAtomic_cancelDuringTheJobEndsItWithCancelledAndClosesTheConnection() {
+    val session = session { it.blockWrites = true }
+    val started = CountDownLatch(1)
+    val failure = AtomicReference<Throwable?>()
+    val worker = thread {
+      try {
+        session.runAtomic("AA:BB", 1_000, confirmCompletion = true, limits = limits, phases = PhaseTimer()) {
+          started.countDown()
+          it.write("JOB".toByteArray(), 5_000)
+        }
+      } catch (e: Throwable) {
+        failure.set(e)
+      }
+    }
+    assertTrue(started.await(2, TimeUnit.SECONDS))
+
+    session.cancel()
+    worker.join(3_000)
+
+    assertEquals(PrinterErrorCode.CANCELLED, (failure.get() as PrinterException).code)
+    assertTrue(transports.single().closed)
+  }
+
+  @Test
+  fun runAtomic_whenTheJobFailsClosesTheConnectionAndKeepsTheError() {
+    val session = session()
+
+    val error = assertFailsWith<PrinterException> {
+      session.runAtomic("AA:BB", 1_000, confirmCompletion = true, limits = limits, phases = PhaseTimer()) {
+        throw PrinterException(PrinterErrorCode.CONNECTION_LOST, "lost")
+      }
+    }
+
+    assertEquals(PrinterErrorCode.CONNECTION_LOST, error.code)
+    assertTrue(transports.single().closed)
+  }
+
+  @Test
+  fun runAtomic_whenTheJobThrowsAnythingElseClosesTheConnection() {
+    val session = session()
+
+    assertFailsWith<IllegalStateException> {
+      session.runAtomic("AA:BB", 1_000, confirmCompletion = false, limits = limits, phases = PhaseTimer()) {
+        throw IllegalStateException("render failed")
+      }
+    }
+
+    assertTrue(transports.single().closed)
+  }
+
+  @Test
+  fun runAtomic_takesOverAConnectionLeftOpenByHand() {
+    val session = session { it.autoReply = true }
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+    assertFalse(transports[0].closed)
+
+    val result = session.runAtomic("AA:BB", 1_000, confirmCompletion = true, limits = limits, phases = PhaseTimer()) {
+      it.write("JOB".toByteArray(), 1_000)
+    }
+
+    assertEquals("Success", result)
+    assertEquals(2, transports.size)
+    assertTrue(transports[0].closed)
+    assertEquals(0, transports[0].written.size()) // the manual connection carried nothing
+    assertContentEquals(
+      "JOB".toByteArray() + PrinterSession.COMPLETION_REQUEST,
+      transports[1].written.toByteArray(),
+    )
+    assertTrue(transports[1].closed)
+  }
+
+  @Test
+  fun runAtomic_recordsEachPhaseAndTakesTheRenderOutOfTheSendTime() {
+    var now = 0L
+    val phases = PhaseTimer { now }
+    val session = session(sleeper = { now += it }, closeGraceMs = 50) { now += 5 } // connect takes 5 ms
+
+    session.runAtomic("AA:BB", 1_000, confirmCompletion = false, limits = limits, phases = phases) {
+      now += 20
+      phases.add(PrintPhase.RENDER, 20)
+      now += 10
+      it.write("JOB".toByteArray(), 1_000)
+    }
+
+    assertEquals(
+      "Atomic print phases: connect=5ms render=20ms send=10ms confirm=50ms",
+      phases.formatLine(),
+    )
+  }
+
+  @Test
+  fun runAtomic_recordsThePhasesReachedWhenItFails() {
+    var now = 0L
+    val phases = PhaseTimer { now }
+    val session = session { now += 7 }
+
+    assertFailsWith<PrinterException> {
+      session.runAtomic("AA:BB", 1_000, confirmCompletion = true, limits = limits, phases = phases) {
+        now += 3
+        throw PrinterException(PrinterErrorCode.CONNECTION_LOST, "lost")
+      }
+    }
+
+    assertEquals(
+      "Atomic print phases: connect=7ms render=0ms send=3ms confirm=0ms",
+      phases.formatLine(),
+    )
+  }
+
+  @Test
+  fun runAtomic_aCancelWhileNothingRunsDoesNotAffectTheNextCall() {
+    val session = session { it.autoReply = true }
+
+    session.cancel()
+    val result = session.runAtomic("AA:BB", 1_000, confirmCompletion = true, limits = limits, phases = PhaseTimer()) {
+      it.write("JOB".toByteArray(), 1_000)
+    }
+
+    assertEquals("Success", result)
+  }
+
+  @Test
+  fun runAtomic_inAFifoQueueRunsInOrderAndACancelEndsOnlyTheRunningCall() {
+    val session = session { if (transports.isEmpty()) it.blockWrites = true else it.autoReply = true }
+    val executor = Executors.newSingleThreadExecutor()
+    try {
+      val started = CountDownLatch(1)
+      val order = Collections.synchronizedList(mutableListOf<String>())
+
+      fun atomic(name: String, onStart: () -> Unit = {}) = executor.submit<String> {
+        session.runAtomic("AA:BB", 1_000, confirmCompletion = true, limits = limits, phases = PhaseTimer()) {
+          onStart()
+          order.add(name)
+          it.write(name.toByteArray(), 5_000)
+        }
+      }
+
+      val first = atomic("A") { started.countDown() }
+      assertTrue(started.await(2, TimeUnit.SECONDS))
+      val second = atomic("B")
+      val third = atomic("C")
+
+      session.cancel()
+
+      val cancelled = assertFailsWith<ExecutionException> { first.get(3, TimeUnit.SECONDS) }
+      assertEquals(PrinterErrorCode.CANCELLED, (cancelled.cause as PrinterException).code)
+      assertEquals("Success", second.get(3, TimeUnit.SECONDS))
+      assertEquals("Success", third.get(3, TimeUnit.SECONDS))
+
+      assertEquals(listOf("A", "B", "C"), order.toList())
+      assertEquals(3, transports.size) // each call on its own connection
+      assertTrue(transports.all { it.closed })
+      assertContentEquals("B".toByteArray() + PrinterSession.COMPLETION_REQUEST, transports[1].written.toByteArray())
+      assertContentEquals("C".toByteArray() + PrinterSession.COMPLETION_REQUEST, transports[2].written.toByteArray())
+    } finally {
+      executor.shutdownNow()
+    }
   }
 
   @Test

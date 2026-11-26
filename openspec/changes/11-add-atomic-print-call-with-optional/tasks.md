@@ -2,10 +2,10 @@
 
 ## 1. Native session: atomic job, queue semantics and phase timing
 
-- [ ] 1.1 Add a plain Kotlin `PhaseTimer` (injectable clock) that records connect, render, send and confirm milliseconds and formats one log line with no MAC address or PIN; verify with a JVM unit test of the formatted line.
-- [ ] 1.2 Add `PrinterSession.runAtomic` (takeover of a manual connection, fresh connection, send, optional completion confirmation, close on every path, cancel scoped to the running call, phases recorded); verify with `PrinterSessionTest` cases using a fake transport: success, `confirmCompletion` true waits for the marker, false skips it, connect failure leaves nothing open, timeout after send, cancel, failure closes, and takeover closes a manual connection.
-- [ ] 1.3 Add `confirmCompletion` (default `true`) to `PrinterSession.runJob`; with `closePort` and `false`, sleep `CLOSE_GRACE_MS` then close; verify with a `PrinterSessionTest` case using a recording sleeper, and that the default path is unchanged.
-- [ ] 1.4 Verify FIFO order and that a cancel only ends the running call while queued calls still run, with a JVM test that runs atomic calls through a single-thread executor and a fake transport.
+- [x] 1.1 Add a plain Kotlin `PhaseTimer` (injectable clock) that records connect, render, send and confirm milliseconds and formats one log line with no MAC address or PIN; verify with a JVM unit test of the formatted line.
+- [x] 1.2 Add `PrinterSession.runAtomic` (takeover of a manual connection, fresh connection, send, optional completion confirmation, close on every path, cancel scoped to the running call, phases recorded); verify with `PrinterSessionTest` cases using a fake transport: success, `confirmCompletion` true waits for the marker, false skips it, connect failure leaves nothing open, timeout after send, cancel, failure closes, and takeover closes a manual connection.
+- [x] 1.3 Add `confirmCompletion` (default `true`) to `PrinterSession.runJob`; with `closePort` and `false`, sleep `CLOSE_GRACE_MS` then close; verify with a `PrinterSessionTest` case using a recording sleeper, and that the default path is unchanged.
+- [x] 1.4 Verify FIFO order and that a cancel only ends the running call while queued calls still run, with a JVM test that runs atomic calls through a single-thread executor and a fake transport.
 
 ## 2. Plugin wiring
 

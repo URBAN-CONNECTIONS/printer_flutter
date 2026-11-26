@@ -7,7 +7,7 @@ class JobLimits(val writeTimeoutMs: Long, val completionTimeoutMs: Long)
  * The connection of the plugin and the order of what happens on it: open (with the optional
  * printer reset), jobs, close and cancel.
  *
- * Calls to [open], [runJob] and [closePort] run one at a time on the plugin's job thread.
+ * Calls to [open], [runJob], [runAtomic] and [closePort] run one at a time on the plugin's job thread.
  * [cancel] is called from another thread and acts only while one of them is running.
  * The connection itself comes from [newConnection], so tests can use a fake transport.
  */
@@ -24,7 +24,7 @@ class PrinterSession(
   /** true when the last job or open hung, was cancelled or failed. */
   @Volatile private var lastJobFailed = false
 
-  /** true while [open], [runJob] or [closePort] is running. */
+  /** true while [open], [runJob], [runAtomic] or [closePort] is running. */
   @Volatile private var busy = false
 
   /** true when [cancel] arrived during the running call, even before it had a connection. */
@@ -55,11 +55,18 @@ class PrinterSession(
   }
 
   /**
-   * Sends a job on the open connection. With [closePort], waits for the printer to confirm it
-   * processed everything (TSPL `OUT` marker) within the limit, then closes the connection.
+   * Sends a job on the open connection. With [closePort], and [confirmCompletion] true, waits for
+   * the printer to confirm it processed everything (TSPL `OUT` marker) within the limit, then
+   * closes the connection. With [closePort] and [confirmCompletion] false, it does not wait: it
+   * gives the printer the close grace time to receive the last bytes, then closes.
    * Any failure closes the connection, so the next job starts on a new one.
    */
-  fun runJob(closePort: Boolean, limits: JobLimits, send: (PrinterConnection) -> Unit): String = exclusive {
+  fun runJob(
+    closePort: Boolean,
+    limits: JobLimits,
+    confirmCompletion: Boolean = true,
+    send: (PrinterConnection) -> Unit,
+  ): String = exclusive {
     val current = connection
     if (current == null || !current.isOpen) {
       lastJobFailed = true
@@ -71,8 +78,12 @@ class PrinterSession(
     try {
       send(current)
       if (closePort) {
-        current.write(COMPLETION_REQUEST, limits.writeTimeoutMs)
-        current.awaitMarker(COMPLETION_MARKER, limits.completionTimeoutMs)
+        if (confirmCompletion) {
+          current.write(COMPLETION_REQUEST, limits.writeTimeoutMs)
+          current.awaitMarker(COMPLETION_MARKER, limits.completionTimeoutMs)
+        } else {
+          sleeper(closeGraceMs)
+        }
         closeConnection()
       }
       lastJobFailed = false
@@ -81,6 +92,59 @@ class PrinterSession(
       lastJobFailed = true
       closeConnection()
       throw e
+    }
+  }
+
+  /**
+   * One whole job in one call: closes a connection left open by hand (takeover), opens a fresh
+   * connection within [connectTimeoutMs], runs [send], then, with [confirmCompletion], asks the
+   * printer to confirm it processed everything and waits for it within the limit. Without it, the
+   * call waits the close grace time so the printer receives the last bytes, and does not wait for
+   * the confirmation. The connection is closed on every path.
+   *
+   * The callers run on the plugin's job thread, so atomic calls run first-in-first-out. A [cancel]
+   * ends only the call that is running; the flag is reset when each call starts, so a call that
+   * was waiting in the queue starts clean.
+   *
+   * The time of each phase goes to [phases]. A render measured inside [send] (with
+   * [PrintPhase.RENDER]) is taken out of the send phase, so no time is counted twice.
+   */
+  fun runAtomic(
+    macAddress: String,
+    connectTimeoutMs: Long,
+    confirmCompletion: Boolean,
+    limits: JobLimits,
+    phases: PhaseTimer,
+    send: (PrinterConnection) -> Unit,
+  ): String = exclusive {
+    // Takeover: a connection left open with openPort is closed first.
+    closeConnection()
+    try {
+      throwIfCancelRequested()
+      val opened = phases.measure(PrintPhase.CONNECT) {
+        val fresh = newConnection(macAddress)
+        connection = fresh
+        // A cancel that arrived before the connection was published must still apply.
+        if (cancelRequested) fresh.cancel()
+        fresh.open(connectTimeoutMs)
+        fresh
+      }
+      phases.measureExcluding(PrintPhase.SEND, PrintPhase.RENDER) { send(opened) }
+      phases.measure(PrintPhase.CONFIRM) {
+        if (confirmCompletion) {
+          opened.write(COMPLETION_REQUEST, limits.writeTimeoutMs)
+          opened.awaitMarker(COMPLETION_MARKER, limits.completionTimeoutMs)
+        } else {
+          sleeper(closeGraceMs)
+        }
+      }
+      lastJobFailed = false
+      "Success"
+    } catch (e: Throwable) {
+      lastJobFailed = true
+      throw e
+    } finally {
+      closeConnection()
     }
   }
 
