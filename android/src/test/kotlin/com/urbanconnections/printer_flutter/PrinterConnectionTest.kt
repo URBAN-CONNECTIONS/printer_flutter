@@ -160,6 +160,100 @@ class PrinterConnectionTest {
   }
 
   @Test
+  fun probe_asksWithOutAndReturnsWhenThePrinterAnswers() {
+    val transport = FakeTransport()
+    transport.onFlush = { transport.reply("READY") }
+    val connection = PrinterConnection(transport, watchdog, pollIntervalMs = 5)
+
+    connection.probe(timeoutMs = 1_000)
+
+    assertEquals("OUT \"READY\"\r\n", String(transport.written.toByteArray(), Charsets.US_ASCII))
+    assertTrue(connection.isOpen)
+  }
+
+  @Test
+  fun probe_withoutAnAnswerFailsWithPrinterNotReadyAndCloses() {
+    val transport = FakeTransport()
+    val connection = PrinterConnection(transport, watchdog, pollIntervalMs = 5)
+
+    val error = assertFailsWith<PrinterException> { connection.probe(timeoutMs = 100) }
+
+    assertEquals(PrinterErrorCode.PRINTER_NOT_READY, error.code)
+    assertEquals("La impresora no contesta. Apágala y vuelve a encenderla.", error.message)
+    assertTrue(transport.closed)
+    assertTrue(!connection.isOpen)
+  }
+
+  @Test
+  fun probe_whoseWriteIsBlockedFailsWithPrinterNotReadyAndCloses() {
+    val transport = FakeTransport()
+    transport.blockWrites = true
+    val connection = PrinterConnection(transport, watchdog, pollIntervalMs = 5)
+
+    val error = assertFailsWith<PrinterException> { connection.probe(timeoutMs = 100) }
+
+    assertEquals(PrinterErrorCode.PRINTER_NOT_READY, error.code)
+    assertTrue(transport.closed)
+  }
+
+  @Test
+  fun probe_givesTheAnswerOnlyWhatTheWriteLeftOfTheLimit() {
+    val transport = FakeTransport()
+    transport.onFlush = { Thread.sleep(400) }
+    val connection = PrinterConnection(transport, watchdog, pollIntervalMs = 5)
+    val start = System.nanoTime()
+
+    val error = assertFailsWith<PrinterException> { connection.probe(timeoutMs = 800) }
+
+    val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)
+    assertEquals(PrinterErrorCode.PRINTER_NOT_READY, error.code)
+    // A limit for each step would end after 1200 ms.
+    assertTrue(elapsedMs in 750L..1_150L, "took $elapsedMs ms")
+  }
+
+  @Test
+  fun probe_cancelledWhileWaitingEndsWithCancelled() {
+    val transport = FakeTransport()
+    val connection = PrinterConnection(transport, watchdog, pollIntervalMs = 5)
+    thread {
+      Thread.sleep(50)
+      connection.cancel()
+    }
+
+    val error = assertFailsWith<PrinterException> { connection.probe(timeoutMs = 5_000) }
+
+    assertEquals(PrinterErrorCode.CANCELLED, error.code)
+    assertTrue(transport.closed)
+  }
+
+  @Test
+  fun probe_cancelledWhileWritingEndsWithCancelled() {
+    val transport = FakeTransport()
+    transport.blockWrites = true
+    val connection = PrinterConnection(transport, watchdog, pollIntervalMs = 5)
+    thread {
+      Thread.sleep(50)
+      connection.cancel()
+    }
+
+    val error = assertFailsWith<PrinterException> { connection.probe(timeoutMs = 5_000) }
+
+    assertEquals(PrinterErrorCode.CANCELLED, error.code)
+  }
+
+  @Test
+  fun probe_onALostConnectionReportsConnectionLost() {
+    val transport = FakeTransport()
+    transport.failReads = true
+    val connection = PrinterConnection(transport, watchdog, pollIntervalMs = 5)
+
+    val error = assertFailsWith<PrinterException> { connection.probe(timeoutMs = 5_000) }
+
+    assertEquals(PrinterErrorCode.CONNECTION_LOST, error.code)
+    assertTrue(transport.closed)
+  }
+
+  @Test
   fun indexOf_findsTheMarker() {
     val haystack = "xxENDLINE\r\n".toByteArray()
     assertEquals(2, PrinterConnection.indexOf(haystack, "ENDLINE".toByteArray()))
@@ -173,6 +267,9 @@ class PrinterConnectionTest {
     @Volatile var failConnect = false
     @Volatile var blockConnect = false
     @Volatile var blockWrites = false
+
+    /** Runs when the written bytes are flushed. */
+    @Volatile var onFlush: () -> Unit = {}
     val written = ByteArrayOutputStream()
     private val incoming = ConcurrentLinkedQueue<Byte>()
     private val closedLatch = CountDownLatch(1)
@@ -207,6 +304,8 @@ class PrinterConnectionTest {
         }
         written.write(b)
       }
+
+      override fun flush() = onFlush()
     }
 
     override fun close() {

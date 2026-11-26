@@ -8,6 +8,7 @@ class JobLimits(val writeTimeoutMs: Long, val completionTimeoutMs: Long)
  * printer reset), jobs, close and cancel.
  *
  * Calls to [open], [runJob], [runAtomic] and [closePort] run one at a time on the plugin's job thread.
+ * A job can be preceded by a probe that checks the printer answers (see [PrinterConnection.probe]).
  * [cancel] is called from another thread and acts only while one of them is running.
  * The connection itself comes from [newConnection], so tests can use a fake transport.
  */
@@ -30,6 +31,8 @@ class PrinterSession(
   private val beforeCancel: () -> Unit = {},
   /** Milliseconds from a monotonic clock, to time the reconnect window. Injectable for tests. */
   private val clock: () -> Long = { System.nanoTime() / NANOS_PER_MILLI },
+  /** How long a probe waits, unless the printer may still be busy. Injectable for tests. */
+  private val probeTimeoutMs: Long = PROBE_TIMEOUT_MS,
 ) {
   /**
    * Guards [busy] and [cancelRequested] so a cancel is decided against one call only: it never
@@ -43,6 +46,16 @@ class PrinterSession(
 
   /** The open connection, read by [cancel] from another thread. */
   @Volatile private var connection: PrinterConnection? = null
+
+  /** The printer of the connection made by [open], as an upper-case MAC. Job thread only. */
+  private var openPrinter = ""
+
+  /**
+   * The printers (upper-case MAC) whose last job was sent without asking for confirmation, so they
+   * may still be printing it. A printer leaves the set when it answers a probe or confirms a job.
+   * Kept in memory. Job thread only.
+   */
+  private val unconfirmedPrinters = mutableSetOf<String>()
 
   /** true when the last job or open hung, was cancelled or failed. */
   @Volatile private var lastJobFailed = false
@@ -68,6 +81,7 @@ class PrinterSession(
       throwIfCancelRequested()
       val opened = newConnection(macAddress)
       connection = opened
+      openPrinter = macAddress.uppercase()
       // A cancel that arrived before the connection was published must still apply.
       if (cancelRequested) opened.cancel()
       opened.open(connectTimeoutMs)
@@ -81,17 +95,21 @@ class PrinterSession(
   }
 
   /**
-   * Sends a job on the open connection. With [closePort], and [confirmCompletion] true, waits for
-   * the printer to confirm it processed everything (TSPL `OUT` marker) within the limit, then
-   * closes the connection. With [closePort] and [confirmCompletion] false, it does not wait: it
-   * gives the printer the close grace time to receive the last bytes, then closes. A [cancel]
-   * during that time ends it at once with [PrinterErrorCode.CANCELLED].
+   * Sends a job on the open connection. With [probe], the printer has to answer a probe before any
+   * byte of the job is sent, see [probePrinter].
+   *
+   * With [closePort], and [confirmCompletion] true, waits for the printer to confirm it processed
+   * everything (TSPL `OUT` marker) within the limit, then closes the connection. With [closePort]
+   * and [confirmCompletion] false, it does not wait: it gives the printer the close grace time to
+   * receive the last bytes, then closes. A [cancel] during that time ends it at once with
+   * [PrinterErrorCode.CANCELLED].
    * Any failure closes the connection, so the next job starts on a new one.
    */
   fun runJob(
     closePort: Boolean,
     limits: JobLimits,
     confirmCompletion: Boolean = true,
+    probe: Boolean = false,
     send: (PrinterConnection) -> Unit,
   ): String = exclusive {
     val current = connection
@@ -103,11 +121,12 @@ class PrinterSession(
       )
     }
     try {
+      if (probe) probePrinter(current, openPrinter, limits)
       send(current)
+      if (!confirmCompletion) unconfirmedPrinters.add(openPrinter)
       if (closePort) {
         if (confirmCompletion) {
-          current.write(COMPLETION_REQUEST, limits.writeTimeoutMs)
-          current.awaitMarker(COMPLETION_MARKER, limits.completionTimeoutMs)
+          awaitCompletion(current, openPrinter, limits)
         } else {
           waitUnlessCancelled(closeGraceMs)
         }
@@ -124,7 +143,8 @@ class PrinterSession(
 
   /**
    * One whole job in one call: closes a connection left open by hand (takeover), opens a fresh
-   * connection within [connectTimeoutMs], runs [send], then, with [confirmCompletion], asks the
+   * connection within [connectTimeoutMs], with [probe] checks that the printer answers (see
+   * [probePrinter]), runs [send], then, with [confirmCompletion], asks the
    * printer to confirm it processed everything and waits for it within the limit. Without it, the
    * call waits the close grace time so the printer receives the last bytes, and does not wait for
    * the confirmation. The connection is closed on every path.
@@ -136,8 +156,9 @@ class PrinterSession(
    *
    * Right after a cancelled call, a connection that fails is retried, see [openForAtomic].
    *
-   * The time of each phase goes to [phases]. A render measured inside [send] (with
-   * [PrintPhase.RENDER]) is taken out of the send phase, so no time is counted twice.
+   * The time of each phase goes to [phases]; the probe is part of the connect phase. A render
+   * measured inside [send] (with [PrintPhase.RENDER]) is taken out of the send phase, so no time
+   * is counted twice.
    */
   fun runAtomic(
     macAddress: String,
@@ -145,18 +166,22 @@ class PrinterSession(
     confirmCompletion: Boolean,
     limits: JobLimits,
     phases: PhaseTimer,
+    probe: Boolean = false,
     send: (PrinterConnection) -> Unit,
   ): String = exclusive {
     // Takeover: a connection left open with openPort is closed first.
     closeConnection()
+    val printer = macAddress.uppercase()
     try {
       throwIfCancelRequested()
-      val opened = phases.measure(PrintPhase.CONNECT) { openForAtomic(macAddress, connectTimeoutMs) }
+      val opened = phases.measure(PrintPhase.CONNECT) {
+        openForAtomic(macAddress, connectTimeoutMs).also { if (probe) probePrinter(it, printer, limits) }
+      }
       phases.measureExcluding(PrintPhase.SEND, PrintPhase.RENDER) { send(opened) }
+      if (!confirmCompletion) unconfirmedPrinters.add(printer)
       phases.measure(PrintPhase.CONFIRM) {
         if (confirmCompletion) {
-          opened.write(COMPLETION_REQUEST, limits.writeTimeoutMs)
-          opened.awaitMarker(COMPLETION_MARKER, limits.completionTimeoutMs)
+          awaitCompletion(opened, printer, limits)
         } else {
           waitUnlessCancelled(closeGraceMs)
         }
@@ -233,6 +258,25 @@ class PrinterSession(
     }
   }
 
+  /**
+   * Checks that the printer answers before any byte of a job is sent to it. It waits
+   * [probeTimeoutMs], or the completion limit of the call when the previous job on that printer was
+   * not confirmed, because it may still be printing. Without an answer it throws and the connection
+   * is closed.
+   */
+  private fun probePrinter(target: PrinterConnection, printer: String, limits: JobLimits) {
+    val timeoutMs = if (printer in unconfirmedPrinters) limits.completionTimeoutMs else probeTimeoutMs
+    target.probe(timeoutMs)
+    unconfirmedPrinters.remove(printer)
+  }
+
+  /** Asks the printer to confirm it processed everything and waits for it within the limit. */
+  private fun awaitCompletion(target: PrinterConnection, printer: String, limits: JobLimits) {
+    target.write(COMPLETION_REQUEST, limits.writeTimeoutMs)
+    target.awaitMarker(COMPLETION_MARKER, limits.completionTimeoutMs)
+    unconfirmedPrinters.remove(printer)
+  }
+
   private fun isRightAfterACancelledCall(): Boolean {
     val endedAt = cancelledCallEndedAt ?: return false
     return clock() - endedAt < RECONNECT_WINDOW_MS
@@ -306,6 +350,7 @@ class PrinterSession(
     const val DEFAULT_WRITE_TIMEOUT_MS = 20_000L
     const val DEFAULT_COMPLETION_TIMEOUT_MS = 60_000L
     const val CLOSE_GRACE_MS = 1_500L
+    const val PROBE_TIMEOUT_MS = 2_000L
     const val RESET_SETTLE_MS = 4_000L
     private const val RECONNECT_WINDOW_MS = 5_000L
     private const val RECONNECT_PAUSE_MS = 500L

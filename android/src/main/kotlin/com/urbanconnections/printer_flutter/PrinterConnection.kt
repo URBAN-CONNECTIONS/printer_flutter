@@ -20,6 +20,9 @@ enum class PrinterErrorCode {
 
   /** The job was cancelled from Flutter. */
   CANCELLED,
+
+  /** The printer did not answer the probe, so nothing of the job was sent. */
+  PRINTER_NOT_READY,
 }
 
 class PrinterException(
@@ -137,6 +140,32 @@ class PrinterConnection(
     }
   }
 
+  /**
+   * Checks that the printer answers before a job is sent: writes [PROBE_REQUEST] and waits for
+   * [PROBE_MARKER]. One limit of [timeoutMs] covers both: the write is given the limit and the
+   * wait what is left of it.
+   *
+   * A printer that does not take the question or does not answer it in time ends with
+   * [PrinterErrorCode.PRINTER_NOT_READY] and the connection closed. A cancel or a lost
+   * connection are reported as they are.
+   */
+  fun probe(timeoutMs: Long) {
+    val startedAt = System.nanoTime()
+    try {
+      // Not [write]: it would give the whole limit to the chunk and again to the flush.
+      guarded(timeoutMs, PrinterErrorCode.CONNECTION_LOST, "comprobar la impresora") {
+        transport.output.write(PROBE_REQUEST)
+        transport.output.flush()
+      }
+      val spentMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
+      awaitMarker(PROBE_MARKER, maxOf(0L, timeoutMs - spentMs))
+    } catch (e: PrinterException) {
+      // The expired limit already closed the connection.
+      if (e.code != PrinterErrorCode.TIMEOUT) throw e
+      throw PrinterException(PrinterErrorCode.PRINTER_NOT_READY, NOT_READY_MESSAGE, e)
+    }
+  }
+
   /** Aborts the connection: any call in progress ends with [PrinterErrorCode.CANCELLED]. */
   fun cancel() {
     cancelled = true
@@ -195,6 +224,11 @@ class PrinterConnection(
     const val DEFAULT_POLL_INTERVAL_MS = 50L
     const val WRITE_CHUNK_SIZE = 4096
     const val READ_BUFFER_SIZE = 256
+
+    /** TSPL `OUT` question of the probe: a printer that is ready sends [PROBE_MARKER] back. */
+    val PROBE_REQUEST: ByteArray = "OUT \"READY\"\r\n".toByteArray(Charsets.US_ASCII)
+    const val PROBE_MARKER = "READY"
+    const val NOT_READY_MESSAGE = "La impresora no contesta. Apágala y vuelve a encenderla."
 
     fun indexOf(haystack: ByteArray, needle: ByteArray): Int {
       if (needle.isEmpty()) return 0

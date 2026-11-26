@@ -151,6 +151,8 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
         val command = call.argument<String>("command") ?: ""
         val closePort = call.argument<Boolean>("closePort") ?: false
         val confirmCompletion = call.argument<Boolean>("confirmCompletion") ?: true
+        // Opt-in in the three-step API; an atomic call resolves its own default in executeAtomic.
+        val probe = call.argument<Boolean>("probe") ?: false
         val limits = jobLimitsFrom(call)
         val atomicMac = atomicMacAddress(call)
         if (atomicMac != null) {
@@ -160,7 +162,7 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
           }
         } else {
           executeInBackground(result) {
-            session.runJob(closePort, limits, confirmCompletion) { conn ->
+            session.runJob(closePort, limits, confirmCompletion, probe) { conn ->
               conn.write(command.toByteArray(), limits.writeTimeoutMs)
             }
           }
@@ -170,6 +172,8 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
         val bytes = call.argument<ByteArray>("bytes")
         val closePort = call.argument<Boolean>("closePort") ?: false
         val confirmCompletion = call.argument<Boolean>("confirmCompletion") ?: true
+        // Opt-in in the three-step API; an atomic call resolves its own default in executeAtomic.
+        val probe = call.argument<Boolean>("probe") ?: false
         val limits = jobLimitsFrom(call)
         val atomicMac = atomicMacAddress(call)
         if (atomicMac != null && bytes != null) {
@@ -179,7 +183,7 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
             if (bytes == null) {
               "No bytes provided"
             } else {
-              session.runJob(closePort, limits, confirmCompletion) { conn -> conn.write(bytes, limits.writeTimeoutMs) }
+              session.runJob(closePort, limits, confirmCompletion, probe) { conn -> conn.write(bytes, limits.writeTimeoutMs) }
             }
           }
         }
@@ -198,6 +202,8 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
         val copies = call.argument<Int>("copies") ?: 1
         val closePort = call.argument<Boolean>("closePort") ?: false
         val confirmCompletion = call.argument<Boolean>("confirmCompletion") ?: true
+        // Opt-in in the three-step API; an atomic call resolves its own default in executeAtomic.
+        val probe = call.argument<Boolean>("probe") ?: false
         val limits = jobLimitsFrom(call)
         val atomicMac = atomicMacAddress(call)
         if (atomicMac != null) {
@@ -213,7 +219,7 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
           }
         } else {
           executeInBackground(result) {
-            session.runJob(closePort, limits, confirmCompletion) { conn ->
+            session.runJob(closePort, limits, confirmCompletion, probe) { conn ->
               PdfPrintHelper.printPdf(
                 filePath = filePath,
                 options = options,
@@ -348,6 +354,7 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
   ) {
     val connectTimeoutMs = call.longArgument("connectTimeoutMs", PrinterSession.DEFAULT_CONNECT_TIMEOUT_MS)
     val confirmCompletion = call.argument<Boolean>("confirmCompletion") ?: true
+    val probe = call.argument<Boolean>("probe") ?: true
     val pin = call.argument<String>("pin") ?: PairingCredentials.DEFAULT_PIN
     val fallbackPin = call.argument<String>("fallbackPin")
     val limits = jobLimitsFrom(call)
@@ -356,7 +363,7 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
     executeInBackground(result) {
       pairing.replace(PairingTarget(macAddress.uppercase(), pin, fallbackPin))
       try {
-        session.runAtomic(macAddress, connectTimeoutMs, confirmCompletion, limits, phases) { conn ->
+        session.runAtomic(macAddress, connectTimeoutMs, confirmCompletion, limits, phases, probe) { conn ->
           send(conn, phases)
         }
       } finally {

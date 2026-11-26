@@ -46,6 +46,7 @@ class PrinterSessionTest {
     onCancelWindow: () -> Unit = {},
     beforeCancel: () -> Unit = {},
     clock: () -> Long = { 0L },
+    probeTimeoutMs: Long = PrinterSession.PROBE_TIMEOUT_MS,
     configure: (FakeTransport) -> Unit = {},
   ) = PrinterSession(
     newConnection = {
@@ -60,6 +61,7 @@ class PrinterSessionTest {
     onCancelWindow = onCancelWindow,
     beforeCancel = beforeCancel,
     clock = clock,
+    probeTimeoutMs = probeTimeoutMs,
   )
 
   private fun PrinterSession.atomicJob(
@@ -992,6 +994,278 @@ class PrinterSessionTest {
     assertTrue(slept.size > 1)
   }
 
+  /** A session whose printers answer a probe after [PROBE_ANSWER_MS], later than the short limit. */
+  private fun slowPrinterSession(sleeper: (Long) -> Unit = {}, closeGraceMs: Long = 0) =
+    session(sleeper = sleeper, closeGraceMs = closeGraceMs, probeTimeoutMs = SHORT_PROBE_MS) {
+      it.probeAnswerDelayMs = PROBE_ANSWER_MS
+      it.autoReply = true
+    }
+
+  private val longLimits = JobLimits(writeTimeoutMs = 2_000, completionTimeoutMs = 5_000)
+
+  private fun PrinterSession.probedAtomicJob(
+    mac: String = "AA:BB",
+    jobLimits: JobLimits = longLimits,
+    send: (PrinterConnection) -> Unit = { it.write("JOB".toByteArray(), 1_000) },
+  ) = runAtomic(mac, 1_000, confirmCompletion = true, limits = jobLimits, phases = PhaseTimer(), probe = true, send = send)
+
+  private fun PrinterSession.unprobedAtomicJob(mac: String = "AA:BB", confirmCompletion: Boolean) =
+    runAtomic(mac, 1_000, confirmCompletion, longLimits, PhaseTimer(), probe = false) {
+      it.write("JOB".toByteArray(), 1_000)
+    }
+
+  private fun assertNotReady(call: () -> Unit) {
+    val error = assertFailsWith<PrinterException> { call() }
+    assertEquals(PrinterErrorCode.PRINTER_NOT_READY, error.code)
+  }
+
+  @Test
+  fun runAtomic_withTheProbeAsksFirstAndSendsTheJobAfterTheAnswer() {
+    val session = session {
+      it.probeAnswerDelayMs = 50
+      it.autoReply = true
+    }
+    var answeredBeforeTheJob = false
+
+    val result = session.probedAtomicJob {
+      answeredBeforeTheJob = transports.single().probeAnswered
+      it.write("JOB".toByteArray(), 1_000)
+    }
+
+    assertEquals("Success", result)
+    assertTrue(answeredBeforeTheJob)
+    assertContentEquals(
+      PrinterConnection.PROBE_REQUEST + "JOB".toByteArray() + PrinterSession.COMPLETION_REQUEST,
+      transports.single().written.toByteArray(),
+    )
+    assertTrue(transports.single().closed)
+  }
+
+  @Test
+  fun runAtomic_withoutAnAnswerToTheProbeSendsNoByteOfTheJobAndCloses() {
+    val session = session(probeTimeoutMs = SHORT_PROBE_MS)
+    var sent = false
+
+    assertNotReady { session.probedAtomicJob { sent = true } }
+
+    assertFalse(sent)
+    assertContentEquals(PrinterConnection.PROBE_REQUEST, transports.single().written.toByteArray())
+    assertTrue(transports.single().closed)
+  }
+
+  @Test
+  fun runAtomic_theProbeWaitsTwoSecondsByDefault() {
+    val session = session()
+    val start = System.nanoTime()
+
+    assertNotReady { session.probedAtomicJob(jobLimits = JobLimits(2_000, completionTimeoutMs = 20_000)) }
+
+    val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)
+    assertTrue(elapsedMs in 1_900L..6_000L, "took $elapsedMs ms")
+  }
+
+  @Test
+  fun runAtomic_withTheProbeOffSendsTheJobRightAfterConnecting() {
+    val session = session { it.autoReply = true }
+
+    session.unprobedAtomicJob(confirmCompletion = true)
+
+    assertContentEquals(
+      "JOB".toByteArray() + PrinterSession.COMPLETION_REQUEST,
+      transports.single().written.toByteArray(),
+    )
+  }
+
+  @Test
+  fun runAtomic_theProbeTimeCountsInTheConnectPhase() {
+    var now = 0L
+    val phases = PhaseTimer { now }
+    val session = session {
+      it.probeAnswerDelayMs = 0
+      it.onProbe = { now += 30 }
+    }
+
+    session.runAtomic("AA:BB", 1_000, confirmCompletion = false, limits = limits, phases = phases, probe = true) {
+      now += 9
+    }
+
+    assertEquals("Atomic print phases: connect=30ms render=0ms send=9ms confirm=0ms", phases.formatLine())
+  }
+
+  @Test
+  fun runAtomic_aCancelDuringTheProbeEndsItWithCancelledAndSendsNoByteOfTheJob() {
+    val asked = CountDownLatch(1)
+    val session = session { it.onProbe = { asked.countDown() } }
+    val executor = Executors.newSingleThreadExecutor()
+    try {
+      val call = executor.submit<String> { session.probedAtomicJob() }
+      assertTrue(asked.await(2, TimeUnit.SECONDS))
+
+      session.cancel()
+
+      val failure = assertFailsWith<ExecutionException> { call.get(3, TimeUnit.SECONDS) }
+      assertEquals(PrinterErrorCode.CANCELLED, (failure.cause as PrinterException).code)
+      assertContentEquals(PrinterConnection.PROBE_REQUEST, transports.single().written.toByteArray())
+      assertTrue(transports.single().closed)
+    } finally {
+      executor.shutdownNow()
+    }
+  }
+
+  @Test
+  fun runJob_withoutTheProbeOptionSendsOnlyTheJob() {
+    val session = session()
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+
+    session.runJob(closePort = false, limits = limits) { it.write("JOB".toByteArray(), 1_000) }
+
+    assertContentEquals("JOB".toByteArray(), transports.single().written.toByteArray())
+  }
+
+  @Test
+  fun runJob_withTheProbeAsksBeforeEveryJobOnTheOpenConnection() {
+    val session = session { it.probeAnswerDelayMs = 0 }
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+    assertEquals(0, transports.single().written.size()) // open does not probe
+
+    repeat(2) {
+      session.runJob(closePort = false, limits = limits, probe = true) { it.write("JOB".toByteArray(), 1_000) }
+    }
+
+    val one = PrinterConnection.PROBE_REQUEST + "JOB".toByteArray()
+    assertContentEquals(one + one, transports.single().written.toByteArray())
+    assertFalse(transports.single().closed)
+  }
+
+  @Test
+  fun runJob_withoutAnAnswerToTheProbeSendsNoByteOfTheJobAndCloses() {
+    val session = session(probeTimeoutMs = SHORT_PROBE_MS)
+    session.open("AA:BB", 1_000, resetAfterFailure = false)
+    var sent = false
+
+    assertNotReady { session.runJob(closePort = false, limits = limits, probe = true) { sent = true } }
+
+    assertFalse(sent)
+    assertContentEquals(PrinterConnection.PROBE_REQUEST, transports.single().written.toByteArray())
+    assertTrue(transports.single().closed)
+    val notConnected = assertFailsWith<PrinterException> {
+      session.runJob(closePort = false, limits = limits) { sent = true }
+    }
+    assertEquals(PrinterErrorCode.NOT_CONNECTED, notConnected.code)
+  }
+
+  @Test
+  fun probe_afterAnUnconfirmedAtomicJobWaitsUpToTheCompletionLimit() {
+    val session = slowPrinterSession()
+    session.unprobedAtomicJob(confirmCompletion = false)
+
+    assertEquals("Success", session.probedAtomicJob())
+  }
+
+  @Test
+  fun probe_afterAConfirmedJobAnUnconfirmedJobOnAnotherPrinterKeepsTheShortLimit() {
+    val session = slowPrinterSession()
+    session.unprobedAtomicJob(mac = "AA:BB", confirmCompletion = true)
+    session.unprobedAtomicJob(mac = "CC:DD", confirmCompletion = false)
+
+    assertNotReady { session.probedAtomicJob(mac = "AA:BB") }
+  }
+
+  @Test
+  fun probe_findsThePrinterWhateverTheCaseOfItsAddress() {
+    val session = slowPrinterSession()
+    session.unprobedAtomicJob(mac = "aa:bb", confirmCompletion = false)
+
+    assertEquals("Success", session.probedAtomicJob(mac = "AA:BB"))
+  }
+
+  @Test
+  fun probe_aConfirmedJobClearsTheMark() {
+    val session = slowPrinterSession()
+    session.unprobedAtomicJob(confirmCompletion = false)
+    session.unprobedAtomicJob(confirmCompletion = true)
+
+    assertNotReady { session.probedAtomicJob() }
+  }
+
+  @Test
+  fun probe_anAnswerClearsTheMarkEvenWhenTheJobThenFails() {
+    val session = slowPrinterSession()
+    session.unprobedAtomicJob(confirmCompletion = false)
+    assertFailsWith<IllegalStateException> {
+      session.probedAtomicJob { throw IllegalStateException("render failed") }
+    }
+
+    assertNotReady { session.probedAtomicJob() }
+  }
+
+  @Test
+  fun probe_aCallThatFailsAtTheProbeKeepsTheMark() {
+    val session = slowPrinterSession()
+    session.unprobedAtomicJob(confirmCompletion = false)
+    assertNotReady { session.probedAtomicJob(jobLimits = JobLimits(2_000, completionTimeoutMs = SHORT_PROBE_MS)) }
+
+    assertEquals("Success", session.probedAtomicJob())
+  }
+
+  @Test
+  fun probe_aJobThatWasNotFullySentLeavesNoMark() {
+    val session = slowPrinterSession()
+    assertFailsWith<IllegalStateException> {
+      session.runAtomic("AA:BB", 1_000, confirmCompletion = false, limits = longLimits, phases = PhaseTimer()) {
+        throw IllegalStateException("render failed")
+      }
+    }
+
+    assertNotReady { session.probedAtomicJob() }
+  }
+
+  @Test
+  fun probe_aCancelInTheCloseGraceWaitStillLeavesTheMark() {
+    lateinit var session: PrinterSession
+    var cancelSent = false
+    session = slowPrinterSession(
+      sleeper = {
+        if (!cancelSent) {
+          cancelSent = true
+          session.cancel()
+        }
+      },
+      closeGraceMs = 100,
+    )
+    val cancelled = assertFailsWith<PrinterException> { session.unprobedAtomicJob(confirmCompletion = false) }
+    assertEquals(PrinterErrorCode.CANCELLED, cancelled.code)
+
+    assertEquals("Success", session.probedAtomicJob())
+  }
+
+  @Test
+  fun probe_afterAnUnconfirmedThreeStepJobWaitsUpToTheCompletionLimit() {
+    for (closePort in listOf(true, false)) {
+      val session = slowPrinterSession()
+      session.open("aa:bb", 1_000, resetAfterFailure = false)
+      session.runJob(closePort = closePort, limits = longLimits, confirmCompletion = false) {
+        it.write("JOB".toByteArray(), 1_000)
+      }
+
+      assertEquals("Success", session.probedAtomicJob(), "closePort=$closePort")
+    }
+  }
+
+  @Test
+  fun probe_inTheThreeStepApiUsesAndClearsTheMarkOfTheOpenPrinter() {
+    val session = slowPrinterSession()
+    session.unprobedAtomicJob(confirmCompletion = false)
+    session.open("aa:bb", 1_000, resetAfterFailure = false)
+
+    val result = session.runJob(closePort = true, limits = longLimits, probe = true) {
+      it.write("JOB".toByteArray(), 1_000)
+    }
+
+    assertEquals("Success", result)
+    assertNotReady { session.probedAtomicJob() }
+  }
+
   @Test
   fun closePort_closesTheConnection() {
     val session = session()
@@ -1010,6 +1284,15 @@ class PrinterSessionTest {
 
     /** Answers the completion request the way a TSPL printer does. */
     @Volatile var autoReply = false
+
+    /** Answers the probe after this many milliseconds; null never answers it. */
+    @Volatile var probeAnswerDelayMs: Long? = null
+
+    /** true once the answer to the probe is ready to be read. */
+    @Volatile var probeAnswered = false
+
+    /** Runs when the whole probe was written. */
+    @Volatile var onProbe: () -> Unit = {}
     val written = ByteArrayOutputStream()
     private val incoming = ConcurrentLinkedQueue<Byte>()
     private val closedLatch = CountDownLatch(1)
@@ -1035,8 +1318,28 @@ class PrinterSessionTest {
           throw IOException("socket closed")
         }
         written.write(b)
+        if (String(written.toByteArray(), Charsets.US_ASCII).endsWith("OUT \"READY\"\r\n")) {
+          onProbe()
+          answerProbe()
+        }
         if (autoReply && String(written.toByteArray(), Charsets.US_ASCII).endsWith("OUT \"ENDLINE\"\r\n")) {
           "COMPLETED\r\nENDLINE\r\n".toByteArray().forEach { incoming.add(it) }
+        }
+      }
+    }
+
+    private fun answerProbe() {
+      val delayMs = probeAnswerDelayMs ?: return
+      val answer = {
+        "READY".toByteArray().forEach { incoming.add(it) }
+        probeAnswered = true
+      }
+      if (delayMs == 0L) {
+        answer()
+      } else {
+        thread {
+          Thread.sleep(delayMs)
+          answer()
         }
       }
     }
@@ -1045,5 +1348,10 @@ class PrinterSessionTest {
       closed = true
       closedLatch.countDown()
     }
+  }
+
+  private companion object {
+    const val SHORT_PROBE_MS = 100L
+    const val PROBE_ANSWER_MS = 400L
   }
 }

@@ -2,9 +2,9 @@
 
 ## 1. Android probe
 
-- [ ] 1.1 Add `PrinterErrorCode.PRINTER_NOT_READY` and the probe in `PrinterConnection.kt` (`OUT "READY"`, one limit for write and answer, timeout becomes not ready with the message; cancel and connection loss unchanged); verify with JVM tests using a fake transport: answer, no answer, blocked write, cancel
-- [ ] 1.2 Run the probe in `PrinterSession.kt` before the job of `runAtomic` and, when asked, of `runJob`, with the 2 s limit or `completionTimeoutMs` after an unconfirmed job on that printer; verify with JVM tests: no job byte without answer, connection closed, probe off, per-printer mark set and cleared
-- [ ] 1.3 Read the `probe` argument in `PrinterFlutterPlugin.kt` (default true for atomic calls, false otherwise) for `sendTspl`, `sendRawBytes` and `printPdf`; verify the existing JVM tests still pass
+- [x] 1.1 Add `PrinterErrorCode.PRINTER_NOT_READY` and the probe in `PrinterConnection.kt` (`OUT "READY"`, one limit for write and answer, timeout becomes not ready with the message; cancel and connection loss unchanged); verify with JVM tests using a fake transport: answer, no answer, blocked write, cancel
+- [x] 1.2 Run the probe in `PrinterSession.kt` before the job of `runAtomic` and, when asked, of `runJob`, with the 2 s limit or `completionTimeoutMs` after an unconfirmed job on that printer; verify with JVM tests: no job byte without answer, connection closed, probe off, per-printer mark set and cleared
+- [x] 1.3 Read the `probe` argument in `PrinterFlutterPlugin.kt` (default true for atomic calls, false otherwise) for `sendTspl`, `sendRawBytes` and `printPdf`; verify the existing JVM tests still pass
 
 ## 2. Dart API
 
