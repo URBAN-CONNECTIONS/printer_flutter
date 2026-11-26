@@ -129,7 +129,7 @@ class _MyAppState extends State<MyApp> {
 
 ## Print in one call (atomic call)
 
-Pass `macAddress` to `printPdf`, `sendTspl` or `sendRawBytes` and the plugin does the whole job in one native call: it connects, sends, confirms and closes the connection, also when something fails. There is no `openPort` or `closePort` step to forget or to run twice.
+Pass `macAddress` to `printPdf`, `sendTspl` or `sendRawBytes` and the plugin does the whole job in one native call: it connects, checks that the printer answers, sends, confirms and closes the connection, also when something fails. There is no `openPort` or `closePort` step to forget or to run twice.
 
 ```dart
 final printer = PrinterFlutter();
@@ -138,7 +138,7 @@ try {
   await printer.printPdf(
     filePath: path,
     macAddress: '00:00:00:00:00:00',
-    // Optional: pin, fallbackPin, connectTimeout, completionTimeout, confirmCompletion.
+    // Optional: pin, fallbackPin, connectTimeout, completionTimeout, confirmCompletion, probe.
   );
 } on PrinterException catch (e) {
   if (e.type == PrinterErrorType.timeout) {
@@ -155,7 +155,33 @@ try {
 - `closePort: true` has no effect when `macAddress` is set; the call always closes the connection.
 - `cancel()` ends only the call that is running. Calls still waiting in the queue run afterwards.
 - A printer may refuse connections for a moment after a cancelled call closed its link, so an atomic call started right after a cancelled one may retry its connection for up to 5 s, about every 500 ms. Each attempt has its own `connectTimeout`. If the printer still does not accept it, the call fails with `PrinterErrorType.notConnected`; `cancel()` also ends the wait. At any other time the connection is attempted once.
-- Without `macAddress` the three-step API works exactly as before.
+- Without `macAddress` the three-step API works as before; its print calls send a probe only with `probe: true`.
+
+### Probe: does the printer answer?
+
+Connecting does not prove that a printer is healthy: a stuck one may still accept the connection and then take no data. So right after connecting, and before any byte of the job, the plugin asks the printer to answer (TSPL `OUT "READY"`) and waits at most 2 seconds, a limit that covers sending the question and receiving the answer.
+
+If the printer does not answer in time, nothing of the job is sent, the connection is closed and the call fails with `PrinterErrorType.printerNotReady`. Its `message` (in Spanish, like the other native messages) says that the printer does not answer and must be turned off and on. A `cancel()` or a lost connection during the probe is still reported as `cancelled` or `connectionLost`.
+
+The `probe` argument of `printPdf`, `sendTspl` and `sendRawBytes` controls it:
+
+| Call | `probe` not set | To change it |
+|---|---|---|
+| Atomic call (with `macAddress`) | on | `probe: false` sends the job right after connecting |
+| Three-step API (without `macAddress`) | off | `probe: true` probes before the job of that call |
+
+```dart
+// Atomic call without the probe.
+await printer.sendTspl(command, macAddress: mac, probe: false);
+
+// Three-step API with the probe.
+await printer.openPort(mac);
+await printer.sendTspl(command, closePort: true, probe: true);
+```
+
+In the three-step API the probe runs inside the print call, not in `openPort`, so every print call with `probe: true` probes, also several of them on one open connection.
+
+**After an unconfirmed job** the printer may still be busy with it. When the last job sent to a printer used `confirmCompletion: false`, the next probe on that printer waits up to the `completionTimeout` of the current call (60 s by default) instead of 2 s, until the printer answers a probe or confirms a job. Other printers are not affected. The plugin keeps this in memory only, so after an app restart the probe waits 2 s again: if it fails because the printer is still printing, repeat the call.
 
 ### Completion confirmation
 
@@ -173,7 +199,7 @@ On Android each atomic call writes one line to the log with the milliseconds of 
 Atomic print phases: connect=210ms render=40ms send=900ms confirm=120ms
 ```
 
-`render` is only for `printPdf`; it is 0 for `sendTspl` and `sendRawBytes`. With `confirmCompletion: false`, `confirm` is the close-grace delay. Read it with:
+The time of the probe is part of `connect`. `render` is only for `printPdf`; it is 0 for `sendTspl` and `sendRawBytes`. With `confirmCompletion: false`, `confirm` is the close-grace delay. Read it with:
 
 ```
 adb logcat -s PrinterFlutterPlugin:I
@@ -188,6 +214,7 @@ Every call ends within its limits; no call can wait forever.
 | Limit | Default | Applies to |
 |---|---|---|
 | `connectTimeout` | 15 s | `openPort`, and the connect step of an atomic call |
+| Probe | 2 s, not configurable; `completionTimeout` after an unconfirmed job on that printer | the printer's answer before the job, when the probe is on |
 | `writeTimeout` | 20 s per 4 KB chunk | `printPdf`, `sendTspl`, `sendRawBytes` |
 | `completionTimeout` | 60 s from the last byte | the printer's confirmation that it processed everything it was sent, when `closePort: true`, or in an atomic call with `confirmCompletion: true`; not a confirmation that printing finished |
 
@@ -207,6 +234,7 @@ try {
     case PrinterErrorType.connectionLost:
     case PrinterErrorType.timeout:
     case PrinterErrorType.cancelled:
+    case PrinterErrorType.printerNotReady:
     case PrinterErrorType.unknown:
       // Show the error; the next print starts on a new connection.
   }
@@ -220,6 +248,8 @@ try {
 If the connection is cut (or `cancel()` is called) while the plugin is still sending an image, some printers keep waiting for the bytes that never arrive. On a Ribetec this shows as `Downloading...` on its screen, and it stops accepting Bluetooth connections: every `openPort` fails with `notConnected` until the printer is turned off and on. Restarting the phone, turning its Bluetooth off and on, or closing the app does not help, and `resetPrinterAfterFailure` cannot help either, because it needs a connection to send `<ESC>!R`.
 
 The plugin cannot prevent this, only report it. When `openPort` keeps failing after a cut or cancelled print, ask the user to turn the printer off and on. If `cancel()` arrives after the printer already received the whole image, the printer finishes the print and `openPort` works again at once.
+
+Do the same when a call fails with `PrinterErrorType.printerNotReady`: the printer accepted the connection but did not answer the [probe](#probe-does-the-printer-answer).
 
 ## License
 

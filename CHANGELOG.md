@@ -1,5 +1,9 @@
 ## Unreleased
 
+* Added a probe: when it is on, before any byte of a job is sent, the printer has to answer (TSPL `OUT "READY"`) within 2 s. If it does not, nothing of the job is sent, the connection is closed and the call fails with the new `PrinterErrorType.printerNotReady`.
+* **Behaviour change**: atomic calls now probe by default; pass `probe: false` to turn it off. In the three-step API the probe is off unless `printPdf`, `sendTspl` or `sendRawBytes` get `probe: true`.
+* After a job sent with `confirmCompletion: false`, the next probe on that printer waits up to `completionTimeout` instead of 2 s.
+* An exhaustive `switch` over `PrinterErrorType` needs a case for `printerNotReady`.
 * Added an atomic print call: pass the optional `macAddress` (and `pin`, `fallbackPin`, `connectTimeout`) to `printPdf`, `sendTspl` or `sendRawBytes` and the plugin connects, sends, confirms and closes in one native call. Atomic calls run first in, first out, take over a connection left open by `openPort`, and ignore `closePort`. The three-step API (`openPort`, send, `closePort`) is unchanged.
 * Fixed: a queued atomic call could fail with `notConnected` when it connected right after a cancelled one, because the printer refused connections for a moment. For 5 s after a cancelled call, an atomic call now retries a failed connection about every 500 ms.
 * Fixed: with `confirmCompletion: false`, a `cancel()` during the close-grace delay was ignored and the call returned `Success`. It now ends the delay at once, closes the connection and fails with `PrinterErrorType.cancelled`, both in an atomic call and in a send with `closePort: true`. The last bytes may not have reached the printer.

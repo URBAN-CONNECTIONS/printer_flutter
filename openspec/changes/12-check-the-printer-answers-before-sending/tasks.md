@@ -14,5 +14,5 @@
 
 ## 3. Documentation
 
-- [ ] 3.1 Document the probe and `printerNotReady` in `README.md` and in `CHANGELOG.md` under "Unreleased"; verify the documented argument names match the code
-- [ ] 3.2 Write the documentation of "Documentation from the issue" in `design.md` into `GLOSSARY.md` exactly as given; verify only that entry is added
+- [x] 3.1 Document the probe and `printerNotReady` in `README.md` and in `CHANGELOG.md` under "Unreleased"; verify the documented argument names match the code
+- [x] 3.2 Write the documentation of "Documentation from the issue" in `design.md` into `GLOSSARY.md` exactly as given; verify only that entry is added
