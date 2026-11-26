@@ -38,6 +38,7 @@ class MockPrinterFlutterPlatform
     String? fallbackPin,
     Duration? connectTimeout,
     bool confirmCompletion = true,
+    bool? probe,
   }) =>
       Future.value('Success');
 
@@ -52,6 +53,7 @@ class MockPrinterFlutterPlatform
     String? fallbackPin,
     Duration? connectTimeout,
     bool confirmCompletion = true,
+    bool? probe,
   }) =>
       Future.value('Success');
 
@@ -74,6 +76,7 @@ class MockPrinterFlutterPlatform
     String? fallbackPin,
     Duration? connectTimeout,
     bool confirmCompletion = true,
+    bool? probe,
   }) =>
       Future.value('Success');
 }

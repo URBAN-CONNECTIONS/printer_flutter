@@ -58,6 +58,7 @@ class MethodChannelPrinterFlutter extends PrinterFlutterPlatform {
     String? fallbackPin,
     Duration? connectTimeout,
     bool confirmCompletion = true,
+    bool? probe,
   }) {
     return _invoke<String>('sendTspl', {
       'command': command,
@@ -71,6 +72,7 @@ class MethodChannelPrinterFlutter extends PrinterFlutterPlatform {
         connectTimeout: connectTimeout,
         confirmCompletion: confirmCompletion,
       ),
+      if (probe != null) 'probe': probe,
     });
   }
 
@@ -85,6 +87,7 @@ class MethodChannelPrinterFlutter extends PrinterFlutterPlatform {
     String? fallbackPin,
     Duration? connectTimeout,
     bool confirmCompletion = true,
+    bool? probe,
   }) {
     return _invoke<String>('sendRawBytes', {
       'bytes': bytes,
@@ -98,6 +101,7 @@ class MethodChannelPrinterFlutter extends PrinterFlutterPlatform {
         connectTimeout: connectTimeout,
         confirmCompletion: confirmCompletion,
       ),
+      if (probe != null) 'probe': probe,
     });
   }
 
@@ -120,6 +124,7 @@ class MethodChannelPrinterFlutter extends PrinterFlutterPlatform {
     String? fallbackPin,
     Duration? connectTimeout,
     bool confirmCompletion = true,
+    bool? probe,
   }) {
     return _invoke<String>('printPdf', {
       'filePath': filePath,
@@ -135,6 +140,7 @@ class MethodChannelPrinterFlutter extends PrinterFlutterPlatform {
         connectTimeout: connectTimeout,
         confirmCompletion: confirmCompletion,
       ),
+      if (probe != null) 'probe': probe,
     });
   }
 

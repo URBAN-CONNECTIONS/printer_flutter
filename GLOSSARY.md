@@ -15,3 +15,7 @@ _Avoid_: ACK, printed
 **Not confirmed**:
 A timeout after everything was sent: the printer did not confirm it processed the job, and it may still have printed.
 _Avoid_: failed
+
+**Probe**:
+The `OUT` question sent right after connecting, to check that the printer answers before any byte of the job is sent.
+_Avoid_: ping, status check

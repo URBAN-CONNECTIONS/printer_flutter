@@ -108,6 +108,14 @@ class PrinterFlutter {
   /// to skip the wait. A [PrinterErrorType.timeout] after everything was sent
   /// means "not confirmed", not "it did not print": check the printer before
   /// printing again.
+  ///
+  /// With [probe], the printer is first asked to answer (TSPL `OUT`) and no
+  /// byte of the job is sent before it does. It has 2 seconds, or
+  /// [completionTimeout] when the last job sent to that printer used
+  /// [confirmCompletion] false, since it may still be busy with it. A printer
+  /// that does not answer in time fails the call with
+  /// [PrinterErrorType.printerNotReady] and the connection is closed. Unset,
+  /// the probe is on in an atomic call and off otherwise.
   Future<String?> sendTspl(
     String command, {
     bool closePort = false,
@@ -118,6 +126,7 @@ class PrinterFlutter {
     String? fallbackPin,
     Duration? connectTimeout,
     bool confirmCompletion = true,
+    bool? probe,
   }) {
     return PrinterFlutterPlatform.instance.sendTspl(
       command,
@@ -129,6 +138,7 @@ class PrinterFlutter {
       fallbackPin: fallbackPin,
       connectTimeout: connectTimeout,
       confirmCompletion: confirmCompletion,
+      probe: probe,
     );
   }
 
@@ -150,6 +160,14 @@ class PrinterFlutter {
   /// to skip the wait. A [PrinterErrorType.timeout] after everything was sent
   /// means "not confirmed", not "it did not print": check the printer before
   /// printing again.
+  ///
+  /// With [probe], the printer is first asked to answer (TSPL `OUT`) and no
+  /// byte of the job is sent before it does. It has 2 seconds, or
+  /// [completionTimeout] when the last job sent to that printer used
+  /// [confirmCompletion] false, since it may still be busy with it. A printer
+  /// that does not answer in time fails the call with
+  /// [PrinterErrorType.printerNotReady] and the connection is closed. Unset,
+  /// the probe is on in an atomic call and off otherwise.
   Future<String?> sendRawBytes(
     Uint8List bytes, {
     bool closePort = false,
@@ -160,6 +178,7 @@ class PrinterFlutter {
     String? fallbackPin,
     Duration? connectTimeout,
     bool confirmCompletion = true,
+    bool? probe,
   }) {
     return PrinterFlutterPlatform.instance.sendRawBytes(
       bytes,
@@ -171,6 +190,7 @@ class PrinterFlutter {
       fallbackPin: fallbackPin,
       connectTimeout: connectTimeout,
       confirmCompletion: confirmCompletion,
+      probe: probe,
     );
   }
 
@@ -209,6 +229,14 @@ class PrinterFlutter {
   /// to skip the wait. A [PrinterErrorType.timeout] after everything was sent
   /// means "not confirmed", not "it did not print": check the printer before
   /// printing again.
+  ///
+  /// With [probe], the printer is first asked to answer (TSPL `OUT`) and no
+  /// byte of the job is sent before it does. It has 2 seconds, or
+  /// [completionTimeout] when the last job sent to that printer used
+  /// [confirmCompletion] false, since it may still be busy with it. A printer
+  /// that does not answer in time fails the call with
+  /// [PrinterErrorType.printerNotReady] and the connection is closed. Unset,
+  /// the probe is on in an atomic call and off otherwise.
   Future<String?> printPdf({
     required String filePath,
     PdfPrintOptions options = const PdfPrintOptions(),
@@ -221,6 +249,7 @@ class PrinterFlutter {
     String? fallbackPin,
     Duration? connectTimeout,
     bool confirmCompletion = true,
+    bool? probe,
   }) {
     return PrinterFlutterPlatform.instance.printPdf(
       filePath,
@@ -234,6 +263,7 @@ class PrinterFlutter {
       fallbackPin: fallbackPin,
       connectTimeout: connectTimeout,
       confirmCompletion: confirmCompletion,
+      probe: probe,
     );
   }
 }
@@ -267,6 +297,10 @@ enum PrinterErrorType {
   /// The job was cancelled with [PrinterFlutter.cancel].
   cancelled,
 
+  /// The printer did not answer the probe sent before the job, so nothing of
+  /// the job was sent. Turn the printer off and on.
+  printerNotReady,
+
   /// Any other native error.
   unknown,
 }
@@ -288,6 +322,7 @@ class PrinterException implements Exception {
         'CONNECTION_LOST' => PrinterErrorType.connectionLost,
         'TIMEOUT' => PrinterErrorType.timeout,
         'CANCELLED' => PrinterErrorType.cancelled,
+        'PRINTER_NOT_READY' => PrinterErrorType.printerNotReady,
         _ => PrinterErrorType.unknown,
       };
 

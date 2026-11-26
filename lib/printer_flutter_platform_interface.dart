@@ -67,6 +67,10 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
   /// first-out; do not mix them with `openPort`. With [confirmCompletion] false
   /// the call does not wait for the printer's confirmation. A timeout after
   /// everything was sent means "not confirmed", not "it did not print".
+  ///
+  /// With [probe], the printer has to answer before any byte of the job is sent,
+  /// or the call fails with [PrinterErrorType.printerNotReady]. Unset, the probe
+  /// is on in an atomic call and off otherwise.
   Future<String?> sendTspl(
     String command, {
     bool closePort = false,
@@ -77,6 +81,7 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
     String? fallbackPin,
     Duration? connectTimeout,
     bool confirmCompletion = true,
+    bool? probe,
   }) {
     throw UnimplementedError('sendTspl() has not been implemented.');
   }
@@ -92,6 +97,10 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
   /// first-out; do not mix them with `openPort`. With [confirmCompletion] false
   /// the call does not wait for the printer's confirmation. A timeout after
   /// everything was sent means "not confirmed", not "it did not print".
+  ///
+  /// With [probe], the printer has to answer before any byte of the job is sent,
+  /// or the call fails with [PrinterErrorType.printerNotReady]. Unset, the probe
+  /// is on in an atomic call and off otherwise.
   Future<String?> sendRawBytes(
     Uint8List bytes, {
     bool closePort = false,
@@ -102,6 +111,7 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
     String? fallbackPin,
     Duration? connectTimeout,
     bool confirmCompletion = true,
+    bool? probe,
   }) {
     throw UnimplementedError('sendRawBytes() has not been implemented.');
   }
@@ -128,6 +138,10 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
   /// first-out; do not mix them with `openPort`. With [confirmCompletion] false
   /// the call does not wait for the printer's confirmation. A timeout after
   /// everything was sent means "not confirmed", not "it did not print".
+  ///
+  /// With [probe], the printer has to answer before any byte of the job is sent,
+  /// or the call fails with [PrinterErrorType.printerNotReady]. Unset, the probe
+  /// is on in an atomic call and off otherwise.
   Future<String?> printPdf(
     String filePath,
     PdfPrintOptions options, {
@@ -140,6 +154,7 @@ abstract class PrinterFlutterPlatform extends PlatformInterface {
     String? fallbackPin,
     Duration? connectTimeout,
     bool confirmCompletion = true,
+    bool? probe,
   }) {
     throw UnimplementedError('printPdf() has not been implemented.');
   }
