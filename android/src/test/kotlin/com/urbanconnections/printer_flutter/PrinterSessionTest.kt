@@ -326,6 +326,27 @@ class PrinterSessionTest {
   }
 
   @Test
+  fun cancel_whileTheConnectIsBlockedEndsOpenWithCancelledAndClosesTheLink() {
+    val session = session { it.blockConnect = true }
+    val failure = AtomicReference<Throwable?>()
+    val worker = thread {
+      try {
+        session.open("AA:BB", 5_000, resetAfterFailure = false)
+      } catch (e: Throwable) {
+        failure.set(e)
+      }
+    }
+    Thread.sleep(100)
+
+    session.cancel()
+    worker.join(3_000)
+
+    assertFalse(worker.isAlive, "open did not end after the cancel")
+    assertEquals(PrinterErrorCode.CANCELLED, (failure.get() as PrinterException).code)
+    transports.single().awaitClosed()
+  }
+
+  @Test
   fun runAtomic_confirmingWritesTheJobAndTheRequestWaitsForTheMarkerAndCloses() {
     val session = session { it.autoReply = true }
 
@@ -1347,6 +1368,7 @@ class PrinterSessionTest {
   private class FakeTransport : PrinterTransport {
     @Volatile var closed = false
     @Volatile var failConnect = false
+    @Volatile var blockConnect = false
     @Volatile var blockWrites = false
 
     /** Runs after the first byte of the bytes written, once. Tests cancel from here. */
@@ -1377,6 +1399,10 @@ class PrinterSessionTest {
 
     override fun connect() {
       if (failConnect) throw IOException("refused")
+      if (blockConnect) {
+        closedLatch.await(10, TimeUnit.SECONDS)
+        throw IOException("socket closed")
+      }
     }
 
     override val input: InputStream = object : InputStream() {

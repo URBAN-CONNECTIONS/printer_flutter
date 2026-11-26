@@ -160,6 +160,27 @@ class PrinterConnectionTest {
   }
 
   @Test
+  fun open_cancelWhileTheConnectIsBlockedEndsWithCancelledAndClosesAtOnce() {
+    val transport = FakeTransport()
+    transport.blockConnect = true
+    val connection = PrinterConnection(transport, watchdog)
+    val canceller = thread {
+      Thread.sleep(50)
+      connection.cancel()
+    }
+    val startedAt = System.nanoTime()
+
+    val error = assertFailsWith<PrinterException> { connection.open(timeoutMs = 5_000) }
+    val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
+    canceller.join(2_000)
+
+    assertEquals(PrinterErrorCode.CANCELLED, error.code)
+    transport.awaitClosed()
+    assertTrue(!connection.isOpen)
+    assertTrue(elapsedMs < 2_000, "open waited $elapsedMs ms after the cancel")
+  }
+
+  @Test
   fun probe_asksWithOutAndReturnsWhenThePrinterAnswers() {
     val transport = FakeTransport()
     transport.onFlush = { transport.reply("READY") }

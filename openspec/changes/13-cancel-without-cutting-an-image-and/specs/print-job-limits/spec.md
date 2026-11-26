@@ -34,3 +34,7 @@ The plugin SHALL expose `cancel()`, which aborts the job in progress without cut
 #### Scenario: Connection lost in the middle of a block
 - **WHEN** the connection is lost in the middle of a block
 - **THEN** the call SHALL fail as a lost connection, and the README SHALL say to turn the printer off and on if the next job fails
+
+#### Scenario: Cancel while connecting
+- **WHEN** `cancel()` is called while the connection to the printer is being opened and the connect is blocked
+- **THEN** the connection SHALL close at once, the connect SHALL end before its limit runs out, and the call SHALL end with `PrinterErrorCode.cancelled` (not `notConnected` or `timeout`)
