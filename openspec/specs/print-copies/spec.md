@@ -1,4 +1,9 @@
-## ADDED Requirements
+# print-copies Specification
+
+## Purpose
+Lets a print call ask for a number of copies of the document.
+
+## Requirements
 
 ### Requirement: Print Copies Argument
 The system SHALL support an optional `copies` argument for print operations that dictates the number of copies printed. 

@@ -1,5 +1,8 @@
 # auto-pin-pairing
 
+## Purpose
+Answers the Bluetooth pairing request of the printer automatically with a default PIN, and with an alternate PIN when the first one fails, so the user is not asked to type it.
+
 ## Requirements
 
 ### Requirement: Automatic Bluetooth PIN Pairing Interception
