@@ -1,4 +1,9 @@
-## ADDED Requirements
+# pdf-tspl-printing Specification
+
+## Purpose
+Prints a PDF on a TSPL thermal printer with a choice of strategy, the dot width computed from the paper width and the DPI, and dithering to a 1-bit bitmap.
+
+## Requirements
 
 ### Requirement: Configurable PDF Printing Strategies
 The system SHALL support printing PDF documents to TSPL thermal printers using configurable strategies (`unifiedRoll` and `pageByPage`). The default strategy MUST be `pageByPage` to ensure instant start performance and lower peak memory usage.
