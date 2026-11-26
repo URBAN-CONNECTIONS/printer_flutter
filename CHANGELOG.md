@@ -1,5 +1,9 @@
 ## Unreleased
 
+* Fixed: `cancel()` no longer leaves the printer stuck on `Downloading...` when it arrives in the middle of an image or file. The plugin finishes the `BITMAP` band or `DOWNLOAD` file in progress, sends nothing after it and ends the call with `PrinterErrorType.cancelled`. `cancel()` returns at once and does not block the main thread. With `PdfPrintStrategy.dramBatch` it waits for the file in progress.
+* `PdfPrintStrategy.pageByPage` and `PdfPrintStrategy.unifiedRoll` now send each image in `BITMAP` bands of at most 200 rows. The printed result is the same.
+* Rendering and conversion of a PDF stop at the next page, or every 128 rows, when the job is cancelled.
+* Documented that a printer whose connection is lost in the middle of a block shows `Downloading...` and needs to be turned off and on, and that `resetPrinterAfterFailure` (`<ESC>!R`) does not recover it on the RT-320 PB over Bluetooth.
 * Added a probe: when it is on, before any byte of a job is sent, the printer has to answer (TSPL `OUT "READY"`) within 2 s. If it does not, nothing of the job is sent, the connection is closed and the call fails with the new `PrinterErrorType.printerNotReady`.
 * **Behaviour change**: atomic calls now probe by default; pass `probe: false` to turn it off. In the three-step API the probe is off unless `printPdf`, `sendTspl` or `sendRawBytes` get `probe: true`.
 * After a job sent with `confirmCompletion: false`, the next probe on that printer waits up to `completionTimeout` instead of 2 s.

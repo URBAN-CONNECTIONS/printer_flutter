@@ -13,5 +13,5 @@
 
 ## 3. Documentation
 
-- [ ] 3.1 Add the **Stuck printer** entry to `GLOSSARY.md` exactly as in design.md, document the cancel behaviour, the 200-row bands and that `resetPrinterAfterFailure` does not help on the RT-320 PB over Bluetooth in `README.md`, and add a `CHANGELOG.md` entry under unreleased; verify by reading the three files
-- [ ] 3.2 Run the checks and verify they pass: `flutter analyze`, `flutter test`, `dart format .` with no diff, and the Kotlin unit tests
+- [x] 3.1 Add the **Stuck printer** entry to `GLOSSARY.md` exactly as in design.md, document the cancel behaviour, the 200-row bands and that `resetPrinterAfterFailure` does not help on the RT-320 PB over Bluetooth in `README.md`, and add a `CHANGELOG.md` entry under unreleased; verify by reading the three files
+- [x] 3.2 Run the checks and verify they pass: `flutter analyze`, `flutter test`, `dart format .` with no diff, and the Kotlin unit tests
