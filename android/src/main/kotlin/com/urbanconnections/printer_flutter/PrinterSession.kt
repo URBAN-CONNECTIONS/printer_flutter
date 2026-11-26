@@ -134,9 +134,13 @@ class PrinterSession(
           waitUnlessCancelled(closeGraceMs)
         }
         closeConnection()
+      } else {
+        // The connection stays open for the next call. If a cancel reached it after the last check
+        // the link is closed, so the job is reported as cancelled and the dead connection is
+        // dropped. A cancel that only flagged the call, and never reached this connection, is not
+        // a reason to fail: the next call reuses it.
+        current.checkCancelled()
       }
-      // A cancel that landed after the last check closed the connection: report it, and drop it.
-      throwIfCancelRequested()
       lastJobFailed = false
       "Success"
     } catch (e: Throwable) {
@@ -191,7 +195,6 @@ class PrinterSession(
           waitUnlessCancelled(closeGraceMs)
         }
       }
-      throwIfCancelRequested()
       lastJobFailed = false
       "Success"
     } catch (e: Throwable) {
