@@ -17,6 +17,10 @@ An atomic call SHALL, right after connecting, send the probe and wait for the an
 - **WHEN** the printer answers the probe
 - **THEN** the job is sent as usual
 
+#### Scenario: The default limit is 2 seconds
+- **WHEN** an atomic call probes a printer that does not answer, with no unconfirmed job on it and the limit the plugin uses by default
+- **THEN** the call fails after about 2 seconds, not after a longer limit such as 3 or 5 seconds
+
 #### Scenario: Probe turned off
 - **WHEN** an atomic call turns the probe off
 - **THEN** no probe is sent and the job is sent right after connecting

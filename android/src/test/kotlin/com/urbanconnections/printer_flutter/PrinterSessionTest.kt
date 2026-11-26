@@ -10,6 +10,8 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -1055,13 +1057,26 @@ class PrinterSessionTest {
 
   @Test
   fun runAtomic_theProbeWaitsTwoSecondsByDefault() {
-    val session = session()
-    val start = System.nanoTime()
+    val scheduledLimitsMs = mutableListOf<Long>()
+    val recordingWatchdog = object : ScheduledThreadPoolExecutor(1) {
+      override fun schedule(command: Runnable, delay: Long, unit: TimeUnit): ScheduledFuture<*> {
+        scheduledLimitsMs.add(unit.toMillis(delay))
+        return super.schedule(command, delay, unit)
+      }
+    }
+    // Not built with session(), which always passes probeTimeoutMs: this one keeps the default.
+    val session = PrinterSession(
+      newConnection = { PrinterConnection(FakeTransport(), recordingWatchdog, pollIntervalMs = 5) },
+    )
 
-    assertNotReady { session.probedAtomicJob(jobLimits = JobLimits(2_000, completionTimeoutMs = 20_000)) }
+    try {
+      assertNotReady { session.probedAtomicJob(jobLimits = JobLimits(2_000, completionTimeoutMs = 20_000)) }
+    } finally {
+      recordingWatchdog.shutdownNow()
+    }
 
-    val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)
-    assertTrue(elapsedMs in 1_900L..6_000L, "took $elapsedMs ms")
+    // The limit to connect, set by the call, and then the limit of the probe.
+    assertEquals(listOf(1_000L, 2_000L), scheduledLimitsMs)
   }
 
   @Test

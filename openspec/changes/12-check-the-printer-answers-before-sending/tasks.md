@@ -16,3 +16,7 @@
 
 - [x] 3.1 Document the probe and `printerNotReady` in `README.md` and in `CHANGELOG.md` under "Unreleased"; verify the documented argument names match the code
 - [x] 3.2 Write the documentation of "Documentation from the issue" in `design.md` into `GLOSSARY.md` exactly as given; verify only that entry is added
+
+## 4. Review corrections [Iteration 1]
+
+- [x] 4.1 Test: pin the default 2 s limit of the probe: build the session without passing probeTimeoutMs so the production default is used and assert the value is 2000 ms, so that a 3 s or 5 s default fails the test
