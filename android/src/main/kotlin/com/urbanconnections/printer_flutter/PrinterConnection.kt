@@ -5,7 +5,9 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Error types the plugin reports to Flutter. The names are the PlatformException codes. */
 enum class PrinterErrorCode {
@@ -50,6 +52,10 @@ interface PrinterTransport {
  * When a limit expires, or [cancel] is called, the transport is closed. Closing unblocks a
  * connect, read or write stuck on another thread, so no call can wait forever. A closed
  * connection is never reused: open a new one.
+ *
+ * A block (see [writeBlock]) is never cut by a [cancel]: the close waits until the block ends.
+ * Only the limit of the write can close a block in progress. The close that [cancel] asks for runs
+ * on the [watchdog] thread, so the caller of [cancel] never waits for the transport.
  */
 class PrinterConnection(
   private val transport: PrinterTransport,
@@ -59,6 +65,18 @@ class PrinterConnection(
   @Volatile private var closed = false
   @Volatile private var cancelled = false
   @Volatile private var timedOut = false
+
+  /** Guards [inBlock] and the decision of [cancel] to close at once or to wait for the block. */
+  private val blockLock = Any()
+
+  /** true while [writeBlock] is writing a block. Written under [blockLock]. */
+  @Volatile private var inBlock = false
+
+  /** true when [cancel] arrived while a block was being written. Read and written under [blockLock]. */
+  @Volatile private var cancelledInBlock = false
+
+  /** Makes sure the transport is closed once, whoever gets there first. */
+  private val transportClosed = AtomicBoolean(false)
 
   val isOpen: Boolean
     get() = !closed
@@ -84,6 +102,40 @@ class PrinterConnection(
     guarded(timeoutMs, PrinterErrorCode.CONNECTION_LOST, "enviar datos a la impresora") {
       transport.output.flush()
     }
+  }
+
+  /**
+   * Writes [bytes] as one block (a `BITMAP` band or a `DOWNLOAD` file): a [cancel] that arrives
+   * while it is written does not close the transport; the close happens when the block ends, and
+   * the call then ends with [PrinterErrorCode.CANCELLED]. Each chunk must still be accepted within
+   * [timeoutMs]: if the printer stops taking data the limit closes the connection and the error
+   * says the printer may need to be turned off and on.
+   */
+  fun writeBlock(bytes: ByteArray, timeoutMs: Long) {
+    synchronized(blockLock) {
+      checkUsable()
+      inBlock = true
+    }
+    var finished = false
+    try {
+      write(bytes, timeoutMs)
+      finished = true
+    } finally {
+      val cancelRequested = synchronized(blockLock) {
+        inBlock = false
+        cancelled
+      }
+      // A cancel that waited for the block closes now, on every path out of it.
+      if (cancelRequested) close()
+      if (finished && cancelRequested) {
+        throw PrinterException(PrinterErrorCode.CANCELLED, "La impresión se canceló")
+      }
+    }
+  }
+
+  /** Throws [PrinterErrorCode.CANCELLED] when the job was cancelled. Call it between blocks. */
+  fun checkCancelled() {
+    if (cancelled) throw PrinterException(PrinterErrorCode.CANCELLED, "La impresión se canceló")
   }
 
   /**
@@ -166,15 +218,40 @@ class PrinterConnection(
     }
   }
 
-  /** Aborts the connection: any call in progress ends with [PrinterErrorCode.CANCELLED]. */
+  /**
+   * Aborts the connection: any call in progress ends with [PrinterErrorCode.CANCELLED].
+   *
+   * Outside a block the transport is closed at once, on the watchdog thread, so this returns
+   * without waiting for it. While a block is written, only the flag is set and [writeBlock]
+   * closes the transport when the block ends.
+   */
   fun cancel() {
-    cancelled = true
-    close()
+    val closeNow = synchronized(blockLock) {
+      cancelled = true
+      if (inBlock) cancelledInBlock = true
+      !inBlock
+    }
+    if (closeNow) closeOnWatchdog()
   }
 
   fun close() {
-    if (closed) return
     closed = true
+    closeTransport()
+  }
+
+  /** Marks the connection closed and closes the transport on the watchdog thread. */
+  private fun closeOnWatchdog() {
+    closed = true
+    try {
+      watchdog.execute { closeTransport() }
+    } catch (_: RejectedExecutionException) {
+      // The watchdog was shut down with the plugin: close here so the socket never leaks.
+      closeTransport()
+    }
+  }
+
+  private fun closeTransport() {
+    if (!transportClosed.compareAndSet(false, true)) return
     try {
       transport.close()
     } catch (_: Exception) {
@@ -182,7 +259,9 @@ class PrinterConnection(
   }
 
   private fun checkUsable() {
-    if (cancelled) throw PrinterException(PrinterErrorCode.CANCELLED, "La impresión se canceló")
+    if (timedOut && cancelledInBlock) throw stuckBlock(null)
+    // A cancel does not stop the block in progress: it is checked again when the block ends.
+    if (cancelled && !inBlock) throw PrinterException(PrinterErrorCode.CANCELLED, "La impresión se canceló")
     if (timedOut) throw PrinterException(PrinterErrorCode.TIMEOUT, "La impresora no contestó a tiempo")
     if (closed) throw PrinterException(PrinterErrorCode.CONNECTION_LOST, "La conexión con la impresora está cerrada")
   }
@@ -207,9 +286,14 @@ class PrinterConnection(
     checkUsable()
   }
 
+  /** The limit ran out while the block that a cancel waited for was being finished. */
+  private fun stuckBlock(cause: Throwable?) =
+    PrinterException(PrinterErrorCode.TIMEOUT, STUCK_BLOCK_MESSAGE, cause)
+
   private fun failure(failCode: PrinterErrorCode, step: String, cause: Throwable): PrinterException {
     close()
     return when {
+      timedOut && cancelledInBlock -> stuckBlock(cause)
       cancelled -> PrinterException(PrinterErrorCode.CANCELLED, "La impresión se canceló", cause)
       timedOut && failCode != PrinterErrorCode.NOT_CONNECTED ->
         PrinterException(PrinterErrorCode.TIMEOUT, "La impresora no contestó a tiempo al $step", cause)
@@ -228,6 +312,8 @@ class PrinterConnection(
     /** TSPL `OUT` question of the probe: a printer that is ready sends [PROBE_MARKER] back. */
     val PROBE_REQUEST: ByteArray = "OUT \"READY\"\r\n".toByteArray(Charsets.US_ASCII)
     const val PROBE_MARKER = "READY"
+    const val STUCK_BLOCK_MESSAGE =
+      "La impresora dejó de recibir datos al cancelar. Apágala y vuelve a encenderla."
     const val NOT_READY_MESSAGE = "La impresora no contesta. Apágala y vuelve a encenderla."
 
     fun indexOf(haystack: ByteArray, needle: ByteArray): Int {

@@ -421,6 +421,58 @@ class PrinterSessionTest {
   }
 
   @Test
+  fun runAtomic_cancelWhileABlockIsSentFinishesTheBlockSendsNothingAfterAndClosesTheConnection() {
+    val session = session()
+    val block = ByteArray(PrinterConnection.WRITE_CHUNK_SIZE * 2) { 9 }
+
+    val error = assertFailsWith<PrinterException> {
+      session.atomicJob {
+        transports.single().onBlockWrite = { session.cancel() }
+        it.writeBlock(block, 1_000)
+        it.write("PRINT".toByteArray(), 1_000)
+      }
+    }
+
+    assertEquals(PrinterErrorCode.CANCELLED, error.code)
+    val transport = transports.single()
+    assertEquals(block.size, transport.written.size()) // the block was not cut, and nothing followed
+    transport.awaitClosed()
+  }
+
+  @Test
+  fun cancel_returnsBeforeASlowCloseEndsAndTheConnectionClosesOnceItDoes() {
+    val releaseClose = CountDownLatch(1)
+    val session = session {
+      it.blockWrites = true
+      it.onClose = { releaseClose.await(10, TimeUnit.SECONDS) }
+    }
+    val started = CountDownLatch(1)
+    val failure = AtomicReference<Throwable?>()
+    val worker = thread {
+      try {
+        session.atomicJob { connection ->
+          started.countDown()
+          connection.write("JOB".toByteArray(), 5_000)
+        }
+      } catch (e: Throwable) {
+        failure.set(e)
+      }
+    }
+    assertTrue(started.await(2, TimeUnit.SECONDS))
+
+    val start = System.nanoTime()
+    session.cancel()
+    val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)
+
+    assertTrue(elapsedMs < 1_000, "cancel took $elapsedMs ms")
+    assertTrue(!transports.single().closed) // the close is still running on the watchdog thread
+    releaseClose.countDown()
+    worker.join(3_000)
+    assertEquals(PrinterErrorCode.CANCELLED, (failure.get() as PrinterException).code)
+    transports.single().awaitClosed()
+  }
+
+  @Test
   fun runAtomic_whenTheJobFailsClosesTheConnectionAndKeepsTheError() {
     val session = session()
 
@@ -1297,6 +1349,17 @@ class PrinterSessionTest {
     @Volatile var failConnect = false
     @Volatile var blockWrites = false
 
+    /** Runs after the first byte of the bytes written, once. Tests cancel from here. */
+    @Volatile var onBlockWrite: (() -> Unit)? = null
+
+    /** Runs inside [close], before it marks the transport closed. */
+    @Volatile var onClose: () -> Unit = {}
+
+    /** Waits until [close] has run. */
+    fun awaitClosed() {
+      assertTrue(closedLatch.await(2, TimeUnit.SECONDS), "the transport was not closed")
+    }
+
     /** Answers the completion request the way a TSPL printer does. */
     @Volatile var autoReply = false
 
@@ -1333,6 +1396,10 @@ class PrinterSessionTest {
           throw IOException("socket closed")
         }
         written.write(b)
+        onBlockWrite?.let {
+          onBlockWrite = null
+          it()
+        }
         if (String(written.toByteArray(), Charsets.US_ASCII).endsWith("OUT \"READY\"\r\n")) {
           onProbe()
           answerProbe()
@@ -1360,6 +1427,7 @@ class PrinterSessionTest {
     }
 
     override fun close() {
+      onClose()
       closed = true
       closedLatch.countDown()
     }

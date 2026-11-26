@@ -2,8 +2,8 @@
 
 ## 1. Block-safe cancel in the connection
 
-- [ ] 1.1 Add a block write to `PrinterConnection` that defers the close of `cancel()` until the block ends, and a `checkCancelled()` between blocks; verify with JVM tests using a fake transport (cancel mid-block finishes the block and then closes; cancel between blocks closes at once; `writeTimeout` still closes a stuck block with a message that says the printer may need to be turned off and on)
-- [ ] 1.2 Make `cancel` not block the main thread: schedule the socket close on the watchdog thread from `PrinterSession`/`PrinterFlutterPlugin`; verify with a JVM test that `cancel()` returns before a slow `close()` ends, and that the connection closes on every path
+- [x] 1.1 Add a block write to `PrinterConnection` that defers the close of `cancel()` until the block ends, and a `checkCancelled()` between blocks; verify with JVM tests using a fake transport (cancel mid-block finishes the block and then closes; cancel between blocks closes at once; `writeTimeout` still closes a stuck block with a message that says the printer may need to be turned off and on)
+- [x] 1.2 Make `cancel` not block the main thread: schedule the socket close on the watchdog thread from `PrinterSession`/`PrinterFlutterPlugin`; verify with a JVM test that `cancel()` returns before a slow `close()` ends, and that the connection closes on every path
 
 ## 2. Bands and rendering
 

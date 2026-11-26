@@ -207,6 +207,8 @@ class PrinterSession(
   /**
    * Aborts the call in progress: it ends with [PrinterErrorCode.CANCELLED]. Does nothing when no
    * call is running, so a cancel that arrives between two jobs never closes the idle connection.
+   * It never waits for the socket: [PrinterConnection.cancel] closes it on the watchdog thread, and
+   * not at all while a block is being written (see [PrinterConnection.writeBlock]).
    */
   fun cancel() {
     // The check and the flag are one step against the start and end of a call, so a cancel aimed at

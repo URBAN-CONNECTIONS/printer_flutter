@@ -192,7 +192,8 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
         executeInBackground(result) { session.closePort() }
       }
       "cancel" -> {
-        // Runs on the main thread, not on the executor: it must reach a job in progress.
+        // Runs on the main thread, not on the executor: it must reach a job in progress. It only
+        // sets flags; the socket is closed on the watchdog thread, so this never blocks.
         session.cancel()
         result.success("Success")
       }
