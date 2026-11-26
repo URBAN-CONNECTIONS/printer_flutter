@@ -8,9 +8,9 @@
 
 ## 2. Dart API
 
-- [ ] 2.1 Add `PrinterErrorType.printerNotReady` and map `PRINTER_NOT_READY` in `typeFromCode`; verify a Dart test covers it and an unknown code still maps to `unknown`
-- [ ] 2.2 Add `bool? probe` with `///` comments to `sendTspl`, `sendRawBytes` and `printPdf` in `lib/printer_flutter.dart`, the platform interface and the method channel (sent only when set); verify channel and API tests for set and unset, and update fakes and the example so they compile
-- [ ] 2.3 Format the changed Dart files with `dart format`; verify `flutter analyze` and `flutter test` pass
+- [x] 2.1 Add `PrinterErrorType.printerNotReady` and map `PRINTER_NOT_READY` in `typeFromCode`; verify a Dart test covers it and an unknown code still maps to `unknown`
+- [x] 2.2 Add `bool? probe` with `///` comments to `sendTspl`, `sendRawBytes` and `printPdf` in `lib/printer_flutter.dart`, the platform interface and the method channel (sent only when set); verify channel and API tests for set and unset, and update fakes and the example so they compile
+- [x] 2.3 Format the changed Dart files with `dart format`; verify `flutter analyze` and `flutter test` pass
 
 ## 3. Documentation
 

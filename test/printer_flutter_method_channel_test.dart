@@ -228,6 +228,65 @@ void main() {
     });
   });
 
+  group('probe', () {
+    const testMac = '00:00:00:00:00:00';
+    late List<MethodCall> log;
+
+    setUp(() {
+      log = [];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+        log.add(methodCall);
+        return 'Success';
+      });
+    });
+
+    /// Makes the three print calls through the channel and through the public
+    /// API, with the same [probe] and [macAddress].
+    Future<void> printEveryWay({bool? probe, String? macAddress}) async {
+      final previous = PrinterFlutterPlatform.instance;
+      PrinterFlutterPlatform.instance = platform;
+      addTearDown(() => PrinterFlutterPlatform.instance = previous);
+      final api = PrinterFlutter();
+      final bytes = Uint8List.fromList([1]);
+
+      await platform.sendTspl('TEXT', macAddress: macAddress, probe: probe);
+      await platform.sendRawBytes(bytes, macAddress: macAddress, probe: probe);
+      await platform.printPdf('file.pdf', const PdfPrintOptions(),
+          macAddress: macAddress, probe: probe);
+      await api.sendTspl('TEXT', macAddress: macAddress, probe: probe);
+      await api.sendRawBytes(bytes, macAddress: macAddress, probe: probe);
+      await api.printPdf(
+          filePath: 'file.pdf', macAddress: macAddress, probe: probe);
+    }
+
+    for (final macAddress in [null, testMac]) {
+      final style = macAddress == null ? 'three-step' : 'atomic';
+
+      for (final probe in [true, false]) {
+        test('$probe is sent on every $style print call', () async {
+          await printEveryWay(probe: probe, macAddress: macAddress);
+
+          expect(log, hasLength(6));
+          for (final call in log) {
+            expect((call.arguments as Map)['probe'], probe,
+                reason: call.method);
+          }
+        });
+      }
+
+      test('is not sent when unset on the $style print calls', () async {
+        await printEveryWay(macAddress: macAddress);
+
+        expect(log, hasLength(6));
+        for (final call in log) {
+          expect((call.arguments as Map).containsKey('probe'), isFalse,
+              reason: call.method);
+        }
+      });
+    }
+  });
+
   group('errors', () {
     void failWith(String code) {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -241,6 +300,7 @@ void main() {
       'CONNECTION_LOST': PrinterErrorType.connectionLost,
       'TIMEOUT': PrinterErrorType.timeout,
       'CANCELLED': PrinterErrorType.cancelled,
+      'PRINTER_NOT_READY': PrinterErrorType.printerNotReady,
       'PRINTER_ERROR': PrinterErrorType.unknown,
     };
 
