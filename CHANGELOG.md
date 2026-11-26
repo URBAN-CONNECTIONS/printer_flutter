@@ -1,3 +1,12 @@
+## Unreleased
+
+* Added an atomic print call: pass the optional `macAddress` (and `pin`, `fallbackPin`, `connectTimeout`) to `printPdf`, `sendTspl` or `sendRawBytes` and the plugin connects, sends, confirms and closes in one native call. Atomic calls run first in, first out, take over a connection left open by `openPort`, and ignore `closePort`. The three-step API (`openPort`, send, `closePort`) is unchanged.
+* Fixed: a queued atomic call could fail with `notConnected` when it connected right after a cancelled one, because the printer refused connections for a moment. For 5 s after a cancelled call, an atomic call now retries a failed connection about every 500 ms.
+* Fixed: with `confirmCompletion: false`, a `cancel()` during the close-grace delay was ignored and the call returned `Success`. It now ends the delay at once, closes the connection and fails with `PrinterErrorType.cancelled`, both in an atomic call and in a send with `closePort: true`. The last bytes may not have reached the printer.
+* Added `confirmCompletion` (default `true`) to `printPdf`, `sendTspl` and `sendRawBytes`. With `false` the call does not wait for the printer's `OUT` answer; it returns after sending the bytes and closing the connection.
+* A timeout after everything was sent now documents as "not confirmed": the printer may still have printed.
+* Android logs the milliseconds of the connect, render, send and confirm phases of each atomic call (`adb logcat -s PrinterFlutterPlugin:I`).
+
 ## 0.1.0
 
 * **BREAKING**: removed the TSC SDK (`tscsdk.jar`). The plugin now opens, writes, waits on and closes the Bluetooth SPP socket itself, with a limit on every step, so a printer that stops answering can no longer leave the phone unable to print.

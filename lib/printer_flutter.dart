@@ -92,33 +92,85 @@ class PrinterFlutter {
 
   /// Sends a TSPL [command]. With [closePort], waits up to [completionTimeout]
   /// for the printer to confirm it processed everything, then closes the port.
+  ///
+  /// With [macAddress] the call is atomic: it opens the connection to that
+  /// printer (using [pin], [fallbackPin] and [connectTimeout] as `openPort`
+  /// does; [pin] defaults to "0000" and, unset, [fallbackPin] means no second
+  /// attempt), sends, confirms and closes it, all in one native call.
+  /// [closePort] has no effect then, a connection left open by `openPort` is
+  /// closed first, and atomic calls run first-in, first-out. Do not mix the
+  /// atomic style with the three-step style (`openPort`, send, `closePort`) on
+  /// the same printer.
+  ///
+  /// With [confirmCompletion] (default true) the call waits up to
+  /// [completionTimeout] for the printer to confirm it processed everything it
+  /// was sent; that is not a confirmation that it finished printing. Pass false
+  /// to skip the wait. A [PrinterErrorType.timeout] after everything was sent
+  /// means "not confirmed", not "it did not print": check the printer before
+  /// printing again.
   Future<String?> sendTspl(
     String command, {
     bool closePort = false,
     Duration writeTimeout = PrinterLimits.writeTimeout,
     Duration completionTimeout = PrinterLimits.completionTimeout,
+    String? macAddress,
+    String? pin,
+    String? fallbackPin,
+    Duration? connectTimeout,
+    bool confirmCompletion = true,
   }) {
     return PrinterFlutterPlatform.instance.sendTspl(
       command,
       closePort: closePort,
       writeTimeout: writeTimeout,
       completionTimeout: completionTimeout,
+      macAddress: macAddress,
+      pin: pin,
+      fallbackPin: fallbackPin,
+      connectTimeout: connectTimeout,
+      confirmCompletion: confirmCompletion,
     );
   }
 
   /// Sends raw [bytes]. With [closePort], waits up to [completionTimeout] for
   /// the printer to confirm it processed everything, then closes the port.
+  ///
+  /// With [macAddress] the call is atomic: it opens the connection to that
+  /// printer (using [pin], [fallbackPin] and [connectTimeout] as `openPort`
+  /// does; [pin] defaults to "0000" and, unset, [fallbackPin] means no second
+  /// attempt), sends, confirms and closes it, all in one native call.
+  /// [closePort] has no effect then, a connection left open by `openPort` is
+  /// closed first, and atomic calls run first-in, first-out. Do not mix the
+  /// atomic style with the three-step style (`openPort`, send, `closePort`) on
+  /// the same printer.
+  ///
+  /// With [confirmCompletion] (default true) the call waits up to
+  /// [completionTimeout] for the printer to confirm it processed everything it
+  /// was sent; that is not a confirmation that it finished printing. Pass false
+  /// to skip the wait. A [PrinterErrorType.timeout] after everything was sent
+  /// means "not confirmed", not "it did not print": check the printer before
+  /// printing again.
   Future<String?> sendRawBytes(
     Uint8List bytes, {
     bool closePort = false,
     Duration writeTimeout = PrinterLimits.writeTimeout,
     Duration completionTimeout = PrinterLimits.completionTimeout,
+    String? macAddress,
+    String? pin,
+    String? fallbackPin,
+    Duration? connectTimeout,
+    bool confirmCompletion = true,
   }) {
     return PrinterFlutterPlatform.instance.sendRawBytes(
       bytes,
       closePort: closePort,
       writeTimeout: writeTimeout,
       completionTimeout: completionTimeout,
+      macAddress: macAddress,
+      pin: pin,
+      fallbackPin: fallbackPin,
+      connectTimeout: connectTimeout,
+      confirmCompletion: confirmCompletion,
     );
   }
 
@@ -137,9 +189,26 @@ class PrinterFlutter {
   /// Prints the PDF at [filePath].
   ///
   /// Each chunk sent must be accepted within [writeTimeout]. With [closePort],
-  /// the printer must confirm it printed everything within [completionTimeout],
-  /// counted from the last byte sent; the confirmation arrives after all
-  /// [copies] are physically printed. Failures throw a [PrinterException].
+  /// the printer must confirm it processed everything it was sent within
+  /// [completionTimeout], counted from the last byte sent. The confirmation does
+  /// not mean the printer finished printing.
+  /// Failures throw a [PrinterException].
+  ///
+  /// With [macAddress] the call is atomic: it opens the connection to that
+  /// printer (using [pin], [fallbackPin] and [connectTimeout] as `openPort`
+  /// does; [pin] defaults to "0000" and, unset, [fallbackPin] means no second
+  /// attempt), sends, confirms and closes it, all in one native call.
+  /// [closePort] has no effect then, a connection left open by `openPort` is
+  /// closed first, and atomic calls run first-in, first-out. Do not mix the
+  /// atomic style with the three-step style (`openPort`, send, `closePort`) on
+  /// the same printer.
+  ///
+  /// With [confirmCompletion] (default true) the call waits up to
+  /// [completionTimeout] for the printer to confirm it processed everything it
+  /// was sent; that is not a confirmation that it finished printing. Pass false
+  /// to skip the wait. A [PrinterErrorType.timeout] after everything was sent
+  /// means "not confirmed", not "it did not print": check the printer before
+  /// printing again.
   Future<String?> printPdf({
     required String filePath,
     PdfPrintOptions options = const PdfPrintOptions(),
@@ -147,6 +216,11 @@ class PrinterFlutter {
     bool closePort = false,
     Duration writeTimeout = PrinterLimits.writeTimeout,
     Duration completionTimeout = PrinterLimits.completionTimeout,
+    String? macAddress,
+    String? pin,
+    String? fallbackPin,
+    Duration? connectTimeout,
+    bool confirmCompletion = true,
   }) {
     return PrinterFlutterPlatform.instance.printPdf(
       filePath,
@@ -155,6 +229,11 @@ class PrinterFlutter {
       closePort: closePort,
       writeTimeout: writeTimeout,
       completionTimeout: completionTimeout,
+      macAddress: macAddress,
+      pin: pin,
+      fallbackPin: fallbackPin,
+      connectTimeout: connectTimeout,
+      confirmCompletion: confirmCompletion,
     );
   }
 }
@@ -168,7 +247,9 @@ abstract final class PrinterLimits {
   static const Duration writeTimeout = Duration(seconds: 20);
 
   /// How long the printer may take to confirm a job, counted from the last
-  /// byte sent. It includes the physical printing of every copy.
+  /// byte sent. The confirmation means the printer processed everything it was
+  /// sent, not that it finished printing; a timeout after everything was sent
+  /// means "not confirmed", not "it did not print".
   static const Duration completionTimeout = Duration(seconds: 60);
 }
 

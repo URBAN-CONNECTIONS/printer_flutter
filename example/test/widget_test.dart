@@ -1,3 +1,6 @@
+// ignore_for_file: deprecated_member_use
+// Reason: the material.dart import is deprecated in Flutter 3.50; migrate separately.
+
 // This is a basic Flutter widget test.
 //
 // To perform an interaction with a widget in your test, use the WidgetTester

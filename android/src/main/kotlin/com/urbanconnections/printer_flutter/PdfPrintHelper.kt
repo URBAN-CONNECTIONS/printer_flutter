@@ -15,7 +15,8 @@ object PdfPrintHelper {
         options: Map<String, Any>,
         copies: Int = 1,
         sendCommand: (ByteArray) -> Unit,
-        sendString: (String) -> Unit
+        sendString: (String) -> Unit,
+        phases: PhaseTimer? = null
     ) {
         val file = File(filePath)
         if (!file.exists()) {
@@ -43,11 +44,11 @@ object PdfPrintHelper {
             if (pageCount == 0) return
 
             if (strategy == "unifiedRoll") {
-                printUnifiedRoll(pdfRenderer, alignedWidth, widthBytes, enableDithering, trimWhitespace, sendCommand, sendString, paperWidthMm, copies)
+                printUnifiedRoll(pdfRenderer, alignedWidth, widthBytes, enableDithering, trimWhitespace, sendCommand, sendString, paperWidthMm, copies, phases)
             } else if (strategy == "dramBatch") {
-                printDramBatch(pdfRenderer, alignedWidth, widthBytes, enableDithering, trimWhitespace, sendCommand, sendString, paperWidthMm, copies)
+                printDramBatch(pdfRenderer, alignedWidth, widthBytes, enableDithering, trimWhitespace, sendCommand, sendString, paperWidthMm, copies, phases)
             } else {
-                printPageByPage(pdfRenderer, alignedWidth, widthBytes, enableDithering, trimWhitespace, sendCommand, sendString, paperWidthMm, copies)
+                printPageByPage(pdfRenderer, alignedWidth, widthBytes, enableDithering, trimWhitespace, sendCommand, sendString, paperWidthMm, copies, phases)
             }
         } finally {
             pdfRenderer.close()
@@ -64,7 +65,8 @@ object PdfPrintHelper {
         sendCommand: (ByteArray) -> Unit,
         sendString: (String) -> Unit,
         paperWidthMm: Double,
-        copies: Int
+        copies: Int,
+        phases: PhaseTimer?
     ) {
         val pageCount = pdfRenderer.pageCount
         val bitmaps = mutableListOf<Bitmap>()
@@ -79,12 +81,12 @@ object PdfPrintHelper {
             val bitmap = Bitmap.createBitmap(alignedWidth, height, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap)
             canvas.drawColor(Color.WHITE)
-            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+            phases.measureRender { page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT) }
             page.close()
 
             var finalHeight = height
             if (trimWhitespace) {
-                finalHeight = getCroppedHeight(bitmap)
+                finalHeight = phases.measureRender { getCroppedHeight(bitmap) }
             }
 
             val pageBitmap = if (finalHeight != height) {
@@ -118,7 +120,7 @@ object PdfPrintHelper {
         sendString("CLS\r\n")
 
         // Convert to monochrome and send
-        val monoBytes = convertToMonochrome(unifiedBitmap, widthBytes, enableDithering)
+        val monoBytes = phases.measureRender { convertToMonochrome(unifiedBitmap, widthBytes, enableDithering) }
         val header = "BITMAP 0,0,$widthBytes,$totalHeight,0,".toByteArray(Charsets.US_ASCII)
         
         sendCommand(header)
@@ -137,7 +139,8 @@ object PdfPrintHelper {
         sendCommand: (ByteArray) -> Unit,
         sendString: (String) -> Unit,
         paperWidthMm: Double,
-        copies: Int
+        copies: Int,
+        phases: PhaseTimer?
     ) {
         val pageCount = pdfRenderer.pageCount
 
@@ -150,12 +153,12 @@ object PdfPrintHelper {
                 val bitmap = Bitmap.createBitmap(alignedWidth, height, Bitmap.Config.ARGB_8888)
                 val canvas = Canvas(bitmap)
                 canvas.drawColor(Color.WHITE)
-                page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+                phases.measureRender { page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT) }
                 page.close()
 
                 var finalHeight = height
                 if (trimWhitespace) {
-                    finalHeight = getCroppedHeight(bitmap)
+                    finalHeight = phases.measureRender { getCroppedHeight(bitmap) }
                 }
 
                 val pageBitmap = if (finalHeight != height) {
@@ -173,7 +176,7 @@ object PdfPrintHelper {
                 sendString("DIRECTION 0\r\n")
                 sendString("CLS\r\n")
 
-                val monoBytes = convertToMonochrome(pageBitmap, widthBytes, enableDithering)
+                val monoBytes = phases.measureRender { convertToMonochrome(pageBitmap, widthBytes, enableDithering) }
                 val header = "BITMAP 0,0,$widthBytes,$finalHeight,0,".toByteArray(Charsets.US_ASCII)
                 
                 sendCommand(header)
@@ -194,12 +197,12 @@ object PdfPrintHelper {
                 val bitmap = Bitmap.createBitmap(alignedWidth, height, Bitmap.Config.ARGB_8888)
                 val canvas = Canvas(bitmap)
                 canvas.drawColor(Color.WHITE)
-                page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+                phases.measureRender { page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT) }
                 page.close()
 
                 var finalHeight = height
                 if (trimWhitespace) {
-                    finalHeight = getCroppedHeight(bitmap)
+                    finalHeight = phases.measureRender { getCroppedHeight(bitmap) }
                 }
 
                 val pageBitmap = if (finalHeight != height) {
@@ -213,7 +216,7 @@ object PdfPrintHelper {
                 val heightMm = (finalHeight / (203 / 25.4)).roundToInt()
                 val sizeCmd = "SIZE $paperWidthMm mm, $heightMm mm\r\nGAP 0,0\r\nDIRECTION 0\r\nCLS\r\n"
                 
-                val monoBytes = convertToMonochrome(pageBitmap, widthBytes, enableDithering)
+                val monoBytes = phases.measureRender { convertToMonochrome(pageBitmap, widthBytes, enableDithering) }
                 val header = "BITMAP 0,0,$widthBytes,$finalHeight,0,".toByteArray(Charsets.US_ASCII)
                 
                 cache.add(CachedPage(sizeCmd, header, monoBytes))
@@ -240,7 +243,8 @@ object PdfPrintHelper {
         sendCommand: (ByteArray) -> Unit,
         sendString: (String) -> Unit,
         paperWidthMm: Double,
-        copies: Int
+        copies: Int,
+        phases: PhaseTimer?
     ) {
         val pageCount = pdfRenderer.pageCount
         println("PdfPrintHelper: printDramBatch started. Pages to print: $pageCount, Copies: $copies")
@@ -261,12 +265,12 @@ object PdfPrintHelper {
             val bitmap = Bitmap.createBitmap(alignedWidth, height, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap)
             canvas.drawColor(Color.WHITE)
-            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+            phases.measureRender { page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT) }
             page.close()
 
             var finalHeight = height
             if (trimWhitespace) {
-                finalHeight = getCroppedHeight(bitmap)
+                finalHeight = phases.measureRender { getCroppedHeight(bitmap) }
                 println("PdfPrintHelper: Page $i cropped from $height to $finalHeight")
             }
 
@@ -279,7 +283,7 @@ object PdfPrintHelper {
             }
 
             println("PdfPrintHelper: Converting page $i to 1-bit PCX...")
-            val pcxBytes = convertToPcxFile(pageBitmap, enableDithering)
+            val pcxBytes = phases.measureRender { convertToPcxFile(pageBitmap, enableDithering) }
             val filename = "P$i.PCX"
             
             println("PdfPrintHelper: Downloading $filename to DRAM (${pcxBytes.size} bytes)...")
