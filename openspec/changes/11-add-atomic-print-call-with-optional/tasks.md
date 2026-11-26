@@ -19,6 +19,6 @@
 
 ## 4. Documentation
 
-- [ ] 4.1 Document the atomic call, `confirmCompletion`, the queue/takeover/"do not mix the two styles" rule, the meaning of the completion confirmation and "not confirmed", and the phase log in `README.md`; add an entry under "Unreleased" in `CHANGELOG.md`; verify the README example compiles against the new signatures (`flutter analyze`).
-- [ ] 4.2 Write the documentation of the issue exactly as given: create `GLOSSARY.md` with a `# Glossary` heading and the four entries (Job, Atomic call, Completion confirmation, Not confirmed), and the ADR `docs/adr/0002-printing-is-done-with-an-atomic-native-call.md` with the given text; verify both files match the issue text.
-- [ ] 4.3 Run `dart format` on the changed Dart files, `flutter analyze` and `flutter test`; verify all pass with no formatting diff.
+- [x] 4.1 Document the atomic call, `confirmCompletion`, the queue/takeover/"do not mix the two styles" rule, the meaning of the completion confirmation and "not confirmed", and the phase log in `README.md`; add an entry under "Unreleased" in `CHANGELOG.md`; verify the README example compiles against the new signatures (`flutter analyze`).
+- [x] 4.2 Write the documentation of the issue exactly as given: create `GLOSSARY.md` with a `# Glossary` heading and the four entries (Job, Atomic call, Completion confirmation, Not confirmed), and the ADR `docs/adr/0002-printing-is-done-with-an-atomic-native-call.md` with the given text; verify both files match the issue text.
+- [x] 4.3 Run `dart format` on the changed Dart files, `flutter analyze` and `flutter test`; verify all pass with no formatting diff.

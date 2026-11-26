@@ -127,15 +127,68 @@ class _MyAppState extends State<MyApp> {
 
 ---
 
+## Print in one call (atomic call)
+
+Pass `macAddress` to `printPdf`, `sendTspl` or `sendRawBytes` and the plugin does the whole job in one native call: it connects, sends, confirms and closes the connection, also when something fails. There is no `openPort` or `closePort` step to forget or to run twice.
+
+```dart
+final printer = PrinterFlutter();
+
+try {
+  await printer.printPdf(
+    filePath: path,
+    macAddress: '00:00:00:00:00:00',
+    // Optional: pin, fallbackPin, connectTimeout, completionTimeout, confirmCompletion.
+  );
+} on PrinterException catch (e) {
+  if (e.type == PrinterErrorType.timeout) {
+    // "Not confirmed": the printer may still have printed. Check it before printing again.
+  }
+}
+```
+
+`pin`, `fallbackPin` and `connectTimeout` work as in `openPort`.
+
+- **Queue.** Atomic calls run one at a time, first in, first out, so two quick taps never close each other's connection. A call that is waiting starts clean after the one before it ends.
+- **Takeover.** A connection left open by hand with `openPort` is closed when an atomic call starts, and the atomic call opens its own.
+- **Do not mix the two styles** (`openPort`, send, `closePort`) on the same printer.
+- `closePort: true` has no effect when `macAddress` is set; the call always closes the connection.
+- `cancel()` ends only the call that is running. Calls still waiting in the queue run afterwards.
+- Without `macAddress` the three-step API works exactly as before.
+
+### Completion confirmation
+
+By default (`confirmCompletion: true`) the call asks the printer for an `OUT` answer after everything was sent and waits for it up to `completionTimeout`. That answer means the printer processed everything it was sent. It does not mean it finished printing, and the plugin adds no `EOJ` command.
+
+A `PrinterErrorType.timeout` after everything was sent means "not confirmed": the printer did not confirm that it processed the job, and it may still have printed. It does not mean "it did not print", so check the printer before printing again.
+
+With `confirmCompletion: false` the call does not wait for the printer's answer: it returns after the bytes are sent and the connection is closed. Before closing, the plugin still waits a short close-grace delay (1.5 s) so the printer receives the last bytes. Use it when speed matters more than knowing the printer processed the job.
+
+### Where the time goes
+
+On Android each atomic call writes one line to the log with the milliseconds of each phase (it holds no MAC address and no PIN):
+
+```
+Atomic print phases: connect=210ms render=40ms send=900ms confirm=120ms
+```
+
+`render` is only for `printPdf`; it is 0 for `sendTspl` and `sendRawBytes`. With `confirmCompletion: false`, `confirm` is the close-grace delay. Read it with:
+
+```
+adb logcat -s PrinterFlutterPlugin:I
+```
+
+---
+
 ## Limits and errors
 
 Every call ends within its limits; no call can wait forever.
 
 | Limit | Default | Applies to |
 |---|---|---|
-| `connectTimeout` | 15 s | `openPort` |
+| `connectTimeout` | 15 s | `openPort`, and the connect step of an atomic call |
 | `writeTimeout` | 20 s per 4 KB chunk | `printPdf`, `sendTspl`, `sendRawBytes` |
-| `completionTimeout` | 60 s from the last byte | the printer's confirmation when `closePort: true`; includes printing every copy |
+| `completionTimeout` | 60 s from the last byte | the printer's confirmation when `closePort: true`, or in an atomic call with `confirmCompletion: true`; includes printing every copy |
 
 Failures throw `PrinterException`:
 
