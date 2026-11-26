@@ -1,5 +1,8 @@
 # plugin-publishing Specification
 
+## Purpose
+Keeps the package ready to publish: complete metadata, a license, a changelog, documentation and no files that do not belong in the package.
+
 ## Requirements
 
 ### Requirement: Complete Pubspec Metadata

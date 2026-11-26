@@ -1,4 +1,9 @@
-## ADDED Requirements
+# bluetooth-state-management Specification
+
+## Purpose
+Lets the app make sure the Bluetooth adapter is on before it connects to a printer, with the native enablement flow on Android and a state check on iOS.
+
+## Requirements
 
 ### Requirement: Ensure Bluetooth is On (Dart API)
 The plugin SHALL expose a method `ensureBluetoothIsOn()` that returns a `Future<bool>` indicating whether the Bluetooth adapter is enabled and ready to use.
