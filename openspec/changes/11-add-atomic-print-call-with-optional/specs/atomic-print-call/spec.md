@@ -48,6 +48,12 @@ Atomic calls SHALL run one at a time in arrival order, each on its own connectio
 - **THEN** it retries the connection and completes with `Success`
 - **AND** it does not fail with `PrinterErrorType.notConnected` because of the cancelled call
 
+#### Scenario: Cancel during the close-grace wait
+- **GIVEN** an atomic call with `confirmCompletion` false, or a three-step send with `closePort: true` and `confirmCompletion` false, sent every byte and is waiting the close-grace delay
+- **WHEN** `cancel()` is called
+- **THEN** the call ends with `PrinterErrorType.cancelled`, not `Success`
+- **AND** the wait ends without running to its full length and the connection is closed
+
 ### Requirement: Cancel aimed at one call never hits the next
 `cancel()` SHALL act on the call that was running when it was called; if that call ended and the next queued call started in the meantime, the next call SHALL NOT be cancelled.
 

@@ -117,7 +117,7 @@ class PrinterSessionTest {
     }
 
     assertEquals("Success", result)
-    assertEquals(listOf(PrinterSession.CLOSE_GRACE_MS), slept)
+    assertEquals(PrinterSession.CLOSE_GRACE_MS, slept.sum())
     val transport = transports.single()
     assertContentEquals("JOB".toByteArray(), transport.written.toByteArray()) // no completion request
     assertTrue(transport.closed)
@@ -348,7 +348,7 @@ class PrinterSessionTest {
     }
 
     assertEquals("Success", result)
-    assertEquals(listOf(PrinterSession.CLOSE_GRACE_MS), slept)
+    assertEquals(PrinterSession.CLOSE_GRACE_MS, slept.sum())
     val transport = transports.single()
     assertContentEquals("JOB".toByteArray(), transport.written.toByteArray()) // no completion request
     assertTrue(transport.closed)
@@ -917,6 +917,79 @@ class PrinterSessionTest {
     assertEquals(PrinterErrorCode.NOT_CONNECTED, error.code)
     assertEquals(2, transports.size)
     assertTrue(slept.isEmpty())
+  }
+
+  /**
+   * Runs [call], which must wait the close grace time, and cancels it inside the sleep that brings
+   * the time waited to [cancelAtMs]. Checks it ends cancelled with the connection closed, and
+   * returns the sleeps it made.
+   */
+  private fun cancelledInTheGraceWait(cancelAtMs: Long, call: PrinterSession.() -> Unit): List<Long> {
+    lateinit var session: PrinterSession
+    val slept = mutableListOf<Long>()
+    var cancelSent = false
+    session = session(
+      sleeper = {
+        slept.add(it)
+        if (!cancelSent && slept.sum() >= cancelAtMs) {
+          cancelSent = true
+          session.cancel()
+        }
+      },
+      closeGraceMs = PrinterSession.CLOSE_GRACE_MS,
+    )
+
+    val error = assertFailsWith<PrinterException> { session.call() }
+
+    assertEquals(PrinterErrorCode.CANCELLED, error.code)
+    assertTrue(cancelSent)
+    assertTrue(transports.single().closed)
+    return slept
+  }
+
+  private fun PrinterSession.unconfirmedAtomicJob() {
+    runAtomic("AA:BB", 1_000, confirmCompletion = false, limits = limits, phases = PhaseTimer()) {
+      it.write("JOB".toByteArray(), 1_000)
+    }
+  }
+
+  private fun PrinterSession.unconfirmedClosingJob() {
+    open("AA:BB", 1_000, resetAfterFailure = false)
+    runJob(closePort = true, limits = limits, confirmCompletion = false) {
+      it.write("JOB".toByteArray(), 1_000)
+    }
+  }
+
+  @Test
+  fun runAtomic_aCancelDuringTheCloseGraceWaitEndsItWithCancelledAndCutsTheWait() {
+    val slept = cancelledInTheGraceWait(cancelAtMs = 1) { unconfirmedAtomicJob() }
+
+    assertEquals(1, slept.size) // the wait ended at once
+    assertTrue(slept.sum() < PrinterSession.CLOSE_GRACE_MS)
+  }
+
+  @Test
+  fun runAtomic_aCancelInTheLastSliceOfTheCloseGraceWaitEndsItWithCancelled() {
+    val slept = cancelledInTheGraceWait(cancelAtMs = PrinterSession.CLOSE_GRACE_MS) { unconfirmedAtomicJob() }
+
+    assertEquals(PrinterSession.CLOSE_GRACE_MS, slept.sum())
+    assertTrue(slept.size > 1)
+  }
+
+  @Test
+  fun runJob_aCancelDuringTheCloseGraceWaitEndsItWithCancelledAndCutsTheWait() {
+    val slept = cancelledInTheGraceWait(cancelAtMs = 1) { unconfirmedClosingJob() }
+
+    assertEquals(1, slept.size) // the wait ended at once
+    assertTrue(slept.sum() < PrinterSession.CLOSE_GRACE_MS)
+  }
+
+  @Test
+  fun runJob_aCancelInTheLastSliceOfTheCloseGraceWaitEndsItWithCancelled() {
+    val slept = cancelledInTheGraceWait(cancelAtMs = PrinterSession.CLOSE_GRACE_MS) { unconfirmedClosingJob() }
+
+    assertEquals(PrinterSession.CLOSE_GRACE_MS, slept.sum())
+    assertTrue(slept.size > 1)
   }
 
   @Test

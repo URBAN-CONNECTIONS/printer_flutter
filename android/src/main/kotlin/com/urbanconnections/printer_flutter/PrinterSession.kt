@@ -84,7 +84,8 @@ class PrinterSession(
    * Sends a job on the open connection. With [closePort], and [confirmCompletion] true, waits for
    * the printer to confirm it processed everything (TSPL `OUT` marker) within the limit, then
    * closes the connection. With [closePort] and [confirmCompletion] false, it does not wait: it
-   * gives the printer the close grace time to receive the last bytes, then closes.
+   * gives the printer the close grace time to receive the last bytes, then closes. A [cancel]
+   * during that time ends it at once with [PrinterErrorCode.CANCELLED].
    * Any failure closes the connection, so the next job starts on a new one.
    */
   fun runJob(
@@ -108,7 +109,7 @@ class PrinterSession(
           current.write(COMPLETION_REQUEST, limits.writeTimeoutMs)
           current.awaitMarker(COMPLETION_MARKER, limits.completionTimeoutMs)
         } else {
-          sleeper(closeGraceMs)
+          waitUnlessCancelled(closeGraceMs)
         }
         closeConnection()
       }
@@ -130,7 +131,8 @@ class PrinterSession(
    *
    * The callers run on the plugin's job thread, so atomic calls run first-in-first-out. A [cancel]
    * ends only the call that is running; the flag is reset when each call starts, so a call that
-   * was waiting in the queue starts clean.
+   * was waiting in the queue starts clean. A cancel during the close grace wait ends the wait at
+   * once and the call with [PrinterErrorCode.CANCELLED].
    *
    * Right after a cancelled call, a connection that fails is retried, see [openForAtomic].
    *
@@ -156,7 +158,7 @@ class PrinterSession(
           opened.write(COMPLETION_REQUEST, limits.writeTimeoutMs)
           opened.awaitMarker(COMPLETION_MARKER, limits.completionTimeoutMs)
         } else {
-          sleeper(closeGraceMs)
+          waitUnlessCancelled(closeGraceMs)
         }
       }
       lastJobFailed = false
@@ -227,7 +229,6 @@ class PrinterSession(
         if (e.code != PrinterErrorCode.NOT_CONNECTED || !isRightAfterACancelledCall()) throw e
         closeConnection()
         waitUnlessCancelled(RECONNECT_PAUSE_MS)
-        throwIfCancelRequested()
       }
     }
   }
@@ -260,7 +261,10 @@ class PrinterSession(
     waitUnlessCancelled(resetSettleMs)
   }
 
-  /** Waits [totalMs] in short slices, so a [cancel] ends the wait with [PrinterErrorCode.CANCELLED]. */
+  /**
+   * Waits [totalMs] in short slices, so a [cancel] ends the wait with [PrinterErrorCode.CANCELLED].
+   * A cancel that arrives during the last slice ends it the same way.
+   */
   private fun waitUnlessCancelled(totalMs: Long) {
     var waited = 0L
     while (waited < totalMs) {
@@ -269,6 +273,7 @@ class PrinterSession(
       sleeper(slice)
       waited += slice
     }
+    throwIfCancelRequested()
   }
 
   private fun throwIfCancelRequested() {

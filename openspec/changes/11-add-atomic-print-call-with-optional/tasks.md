@@ -35,3 +35,8 @@
 - [x] 6.1 Test: in PrinterSessionTest use a fake transport that refuses connections for a moment after a cancelled runAtomic, with an injected clock and sleeper: the next queued runAtomic ends Success; a failure after the 5 s window or with no previous cancel is attempted once and ends NOT_CONNECTED; a cancel during the retry wait ends CANCELLED; the success case fails without the fix
 - [x] 6.2 In PrinterSession.runAtomic retry the connection about every 500 ms while a cancelled call ended less than 5 s ago, closing each failed connection, and keep the three-step API and every default unchanged
 - [x] 6.3 State in README.md that an atomic call started right after a cancelled one may retry its connection for up to 5 s, and add the fix to the Unreleased entry of CHANGELOG.md
+
+## 7. Review corrections [Iteration 3]
+
+- [x] 7.1 Test: in PrinterSessionTest, a cancel during the close-grace wait of runAtomic with confirmCompletion false, and of runJob with closePort true and confirmCompletion false, ends the call CANCELLED with the connection closed and the wait cut short, including a cancel in the last slice; these cases fail without the fix, and without a cancel the total wait is still CLOSE_GRACE_MS
+- [x] 7.2 In PrinterSession make the close-grace wait of runAtomic and runJob end on cancel and throw CANCELLED afterwards, keeping closePort(), defaults and the grace length unchanged, and note the fix in the Unreleased entry of CHANGELOG.md
