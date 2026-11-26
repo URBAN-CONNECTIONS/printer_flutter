@@ -1,4 +1,4 @@
-## Unreleased
+## 0.1.0
 
 * Fixed: in the three-step API, with `closePort: false`, a `cancel()` that reaches the connection after the last check of a job is no longer reported as success; the call ends with `PrinterErrorType.cancelled` and the closed connection is dropped. A `cancel()` during the close grace wait of `closePort()` also ends it with `cancelled`. Calls still queued when the plugin detaches no longer start.
 * Fixed: `printPdf` with a missing file now fails before connecting. `sendRawBytes` without bytes now fails instead of returning a success string. A PDF that cannot be opened no longer leaks a file descriptor. `PdfPrintStrategy.dramBatch` notices a cancel during its pauses.
