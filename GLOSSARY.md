@@ -19,3 +19,7 @@ _Avoid_: failed
 **Probe**:
 The `OUT` question sent right after connecting, to check that the printer answers before any byte of the job is sent.
 _Avoid_: ping, status check
+
+**Stuck printer**:
+A printer left waiting for the rest of a cut image or file, shown as `Downloading...`; only turning it off and on recovers it.
+_Avoid_: hung, frozen

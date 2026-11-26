@@ -66,6 +66,9 @@ class PrinterSession(
   /** true when [cancel] arrived during the running call, even before it had a connection. */
   @Volatile private var cancelRequested = false
 
+  /** true after [shutdown]: every call that has not started yet ends with [PrinterErrorCode.CANCELLED]. */
+  @Volatile private var shutDown = false
+
   /** The [clock] time at which the last cancelled call ended; null when no call was cancelled. */
   @Volatile private var cancelledCallEndedAt: Long? = null
 
@@ -131,6 +134,12 @@ class PrinterSession(
           waitUnlessCancelled(closeGraceMs)
         }
         closeConnection()
+      } else {
+        // The connection stays open for the next call. If a cancel reached it after the last check
+        // the link is closed, so the job is reported as cancelled and the dead connection is
+        // dropped. A cancel that only flagged the call, and never reached this connection, is not
+        // a reason to fail: the next call reuses it.
+        current.checkCancelled()
       }
       lastJobFailed = false
       "Success"
@@ -196,17 +205,26 @@ class PrinterSession(
     }
   }
 
-  /** Closes the connection. Gives the printer time to receive the last bytes first, as the TSC SDK did. */
+  /**
+   * Closes the connection. Gives the printer time to receive the last bytes first, as the TSC SDK
+   * did. A [cancel] during that time ends it at once with [PrinterErrorCode.CANCELLED]; the
+   * connection is closed either way.
+   */
   fun closePort(): String = exclusive {
-    val current = connection
-    if (current != null && current.isOpen) sleeper(closeGraceMs)
-    closeConnection()
+    try {
+      val current = connection
+      if (current != null && current.isOpen) waitUnlessCancelled(closeGraceMs)
+    } finally {
+      closeConnection()
+    }
     "Success"
   }
 
   /**
    * Aborts the call in progress: it ends with [PrinterErrorCode.CANCELLED]. Does nothing when no
    * call is running, so a cancel that arrives between two jobs never closes the idle connection.
+   * It never waits for the socket: [PrinterConnection.cancel] closes it on the watchdog thread, and
+   * not at all while a block is being written (see [PrinterConnection.writeBlock]).
    */
   fun cancel() {
     // The check and the flag are one step against the start and end of a call, so a cancel aimed at
@@ -227,6 +245,7 @@ class PrinterSession(
   /** Called when the plugin detaches: aborts whatever is running. */
   fun shutdown() {
     val target = synchronized(lock) {
+      shutDown = true
       cancelRequested = true
       connection
     }
@@ -336,6 +355,8 @@ class PrinterSession(
       generation++
     }
     try {
+      // Calls still queued when the plugin detaches must not start.
+      if (shutDown) throw PrinterException(PrinterErrorCode.CANCELLED, "La impresión se canceló")
       return block()
     } finally {
       synchronized(lock) {

@@ -160,6 +160,27 @@ class PrinterConnectionTest {
   }
 
   @Test
+  fun open_cancelWhileTheConnectIsBlockedEndsWithCancelledAndClosesAtOnce() {
+    val transport = FakeTransport()
+    transport.blockConnect = true
+    val connection = PrinterConnection(transport, watchdog)
+    val canceller = thread {
+      Thread.sleep(50)
+      connection.cancel()
+    }
+    val startedAt = System.nanoTime()
+
+    val error = assertFailsWith<PrinterException> { connection.open(timeoutMs = 5_000) }
+    val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
+    canceller.join(2_000)
+
+    assertEquals(PrinterErrorCode.CANCELLED, error.code)
+    transport.awaitClosed()
+    assertTrue(!connection.isOpen)
+    assertTrue(elapsedMs < 2_000, "open waited $elapsedMs ms after the cancel")
+  }
+
+  @Test
   fun probe_asksWithOutAndReturnsWhenThePrinterAnswers() {
     val transport = FakeTransport()
     transport.onFlush = { transport.reply("READY") }
@@ -223,7 +244,7 @@ class PrinterConnectionTest {
     val error = assertFailsWith<PrinterException> { connection.probe(timeoutMs = 5_000) }
 
     assertEquals(PrinterErrorCode.CANCELLED, error.code)
-    assertTrue(transport.closed)
+    transport.awaitClosed()
   }
 
   @Test
@@ -254,6 +275,177 @@ class PrinterConnectionTest {
   }
 
   @Test
+  fun writeBlock_cancelledMidBlockFinishesTheBlockThenClosesAndEndsCancelled() {
+    val transport = FakeTransport()
+    val connection = PrinterConnection(transport, watchdog)
+    val block = ByteArray(PrinterConnection.WRITE_CHUNK_SIZE * 3) { 7 }
+    var cancelled = false
+    transport.onWrite = { total ->
+      // The cancel arrives after the first chunk has been taken.
+      if (!cancelled && total >= PrinterConnection.WRITE_CHUNK_SIZE) {
+        cancelled = true
+        connection.cancel()
+        // The transport must still be open while the block is in progress.
+        assertTrue(!transport.closed)
+      }
+    }
+
+    val error = assertFailsWith<PrinterException> { connection.writeBlock(block, timeoutMs = 1_000) }
+
+    assertEquals(PrinterErrorCode.CANCELLED, error.code)
+    assertEquals(block.size, transport.written.size()) // the whole block went out
+    transport.awaitClosed()
+    assertTrue(!connection.isOpen)
+  }
+
+  @Test
+  fun writeBlock_nothingCanBeWrittenAfterTheCancelledBlock() {
+    val transport = FakeTransport()
+    val connection = PrinterConnection(transport, watchdog)
+    transport.onWrite = { connection.cancel() }
+
+    assertFailsWith<PrinterException> { connection.writeBlock(ByteArray(10), timeoutMs = 1_000) }
+    val sizeAfterBlock = transport.written.size()
+    val error = assertFailsWith<PrinterException> { connection.write(ByteArray(10), timeoutMs = 1_000) }
+
+    assertEquals(PrinterErrorCode.CANCELLED, error.code)
+    assertEquals(sizeAfterBlock, transport.written.size())
+  }
+
+  @Test
+  fun checkCancelled_afterACancelBetweenBlocksThrowsAndTheConnectionIsClosed() {
+    val transport = FakeTransport()
+    val connection = PrinterConnection(transport, watchdog)
+    connection.writeBlock(ByteArray(10), timeoutMs = 1_000)
+    connection.checkCancelled() // not cancelled: nothing happens
+
+    connection.cancel()
+
+    val error = assertFailsWith<PrinterException> { connection.checkCancelled() }
+    assertEquals(PrinterErrorCode.CANCELLED, error.code)
+    transport.awaitClosed()
+    assertEquals(10, transport.written.size())
+  }
+
+  @Test
+  fun writeBlock_afterACancelBetweenBlocksWritesNothing() {
+    val transport = FakeTransport()
+    val connection = PrinterConnection(transport, watchdog)
+    connection.cancel()
+
+    val error = assertFailsWith<PrinterException> { connection.writeBlock(ByteArray(10), timeoutMs = 1_000) }
+
+    assertEquals(PrinterErrorCode.CANCELLED, error.code)
+    assertEquals(0, transport.written.size())
+  }
+
+  @Test
+  fun writeBlock_stuckBlockAfterACancelClosesAtTheLimitAndSaysToTurnThePrinterOffAndOn() {
+    val transport = FakeTransport()
+    val connection = PrinterConnection(transport, watchdog)
+    transport.blockWrites = true
+    thread {
+      Thread.sleep(50)
+      connection.cancel()
+    }
+
+    val error = assertFailsWith<PrinterException> { connection.writeBlock(ByteArray(10), timeoutMs = 300) }
+
+    assertEquals(PrinterErrorCode.TIMEOUT, error.code)
+    assertEquals(PrinterConnection.STUCK_BLOCK_MESSAGE, error.message)
+    assertTrue(error.message!!.contains("Apágala y vuelve a encenderla"))
+    assertTrue(transport.closed)
+  }
+
+  @Test
+  fun writeBlock_stuckBlockWithoutACancelTimesOutAsAWrite() {
+    val transport = FakeTransport()
+    transport.blockWrites = true
+    val connection = PrinterConnection(transport, watchdog)
+
+    val error = assertFailsWith<PrinterException> { connection.writeBlock(ByteArray(10), timeoutMs = 100) }
+
+    assertEquals(PrinterErrorCode.TIMEOUT, error.code)
+    assertTrue(transport.closed)
+  }
+
+  @Test
+  fun writeBlock_connectionLostInTheMiddleFailsAsLostAndCloses() {
+    val transport = FakeTransport()
+    transport.failWritesAfter = 5
+    val connection = PrinterConnection(transport, watchdog)
+
+    val error = assertFailsWith<PrinterException> { connection.writeBlock(ByteArray(10), timeoutMs = 1_000) }
+
+    assertEquals(PrinterErrorCode.CONNECTION_LOST, error.code)
+    assertTrue(transport.closed)
+  }
+
+  @Test
+  fun cancel_whileAPlainWriteIsBlockedClosesAtOnce() {
+    val transport = FakeTransport()
+    transport.blockWrites = true
+    val connection = PrinterConnection(transport, watchdog)
+    thread {
+      Thread.sleep(50)
+      connection.cancel()
+    }
+
+    val error = assertFailsWith<PrinterException> { connection.write(ByteArray(10), timeoutMs = 5_000) }
+
+    assertEquals(PrinterErrorCode.CANCELLED, error.code)
+    transport.awaitClosed()
+  }
+
+  @Test
+  fun cancel_returnsBeforeASlowCloseEnds() {
+    val transport = FakeTransport()
+    val closeStarted = CountDownLatch(1)
+    val releaseClose = CountDownLatch(1)
+    transport.onClose = {
+      closeStarted.countDown()
+      releaseClose.await(10, TimeUnit.SECONDS)
+    }
+    val connection = PrinterConnection(transport, watchdog)
+
+    val start = System.nanoTime()
+    connection.cancel()
+    val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)
+
+    // cancel() did not wait for the close that is still running on the watchdog thread.
+    assertTrue(closeStarted.await(2, TimeUnit.SECONDS))
+    assertTrue(elapsedMs < 1_000, "cancel took $elapsedMs ms")
+    assertTrue(!transport.closed)
+    assertTrue(!connection.isOpen)
+    releaseClose.countDown()
+    transport.awaitClosed()
+  }
+
+  @Test
+  fun cancel_closesInTheCallerWhenTheWatchdogIsGone() {
+    val transport = FakeTransport()
+    val connection = PrinterConnection(transport, watchdog)
+    watchdog.shutdownNow()
+
+    connection.cancel()
+
+    assertTrue(transport.closed)
+  }
+
+  @Test
+  fun cancel_runsTheCloseOnTheWatchdogThread() {
+    val transport = FakeTransport()
+    var closedOn: Thread? = null
+    transport.onClose = { closedOn = Thread.currentThread() }
+    val connection = PrinterConnection(transport, watchdog)
+
+    connection.cancel()
+    transport.awaitClosed()
+
+    assertTrue(closedOn != null && closedOn !== Thread.currentThread())
+  }
+
+  @Test
   fun indexOf_findsTheMarker() {
     val haystack = "xxENDLINE\r\n".toByteArray()
     assertEquals(2, PrinterConnection.indexOf(haystack, "ENDLINE".toByteArray()))
@@ -267,6 +459,20 @@ class PrinterConnectionTest {
     @Volatile var failConnect = false
     @Volatile var blockConnect = false
     @Volatile var blockWrites = false
+
+    /** Writes after this many bytes fail with an IOException; null never fails. */
+    @Volatile var failWritesAfter: Int? = null
+
+    /** Runs after each write, with the total number of bytes written so far. */
+    @Volatile var onWrite: (Int) -> Unit = {}
+
+    /** Runs inside [close], before it marks the transport closed. */
+    @Volatile var onClose: () -> Unit = {}
+
+    /** Waits until [close] has run. */
+    fun awaitClosed() {
+      assertTrue(closedLatch.await(2, TimeUnit.SECONDS), "the transport was not closed")
+    }
 
     /** Runs when the written bytes are flushed. */
     @Volatile var onFlush: () -> Unit = {}
@@ -302,13 +508,16 @@ class PrinterConnectionTest {
           closedLatch.await(10, TimeUnit.SECONDS)
           throw IOException("socket closed")
         }
+        if (written.size() >= (failWritesAfter ?: Int.MAX_VALUE)) throw IOException("link lost")
         written.write(b)
+        onWrite(written.size())
       }
 
       override fun flush() = onFlush()
     }
 
     override fun close() {
+      onClose()
       closed = true
       closedLatch.countDown()
     }

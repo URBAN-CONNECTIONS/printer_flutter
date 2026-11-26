@@ -153,7 +153,7 @@ try {
 - **Takeover.** A connection left open by hand with `openPort` is closed when an atomic call starts, and the atomic call opens its own.
 - **Do not mix the two styles** (`openPort`, send, `closePort`) on the same printer.
 - `closePort: true` has no effect when `macAddress` is set; the call always closes the connection.
-- `cancel()` ends only the call that is running. Calls still waiting in the queue run afterwards.
+- `cancel()` ends only the call that is running. Calls still waiting in the queue run afterwards. See [Cancelling a job](#cancelling-a-job).
 - A printer may refuse connections for a moment after a cancelled call closed its link, so an atomic call started right after a cancelled one may retry its connection for up to 5 s, about every 500 ms. Each attempt has its own `connectTimeout`. If the printer still does not accept it, the call fails with `PrinterErrorType.notConnected`; `cancel()` also ends the wait. At any other time the connection is attempted once.
 - Without `macAddress` the three-step API works as before; its print calls send a probe only with `probe: true`.
 
@@ -241,13 +241,25 @@ try {
 }
 ```
 
-`cancel()` aborts the job in progress. `openPort(mac, resetPrinterAfterFailure: true)` resets the printer with `<ESC>!R` before connecting when the previous job failed; enable it only for printers that support that command.
+`openPort(mac, resetPrinterAfterFailure: true)` resets the printer with `<ESC>!R` before connecting when the previous job failed; enable it only for printers that support that command. It does not help a stuck printer: on the RT-320 PB over Bluetooth it was tested and `<ESC>!R` does not recover it (see below).
 
-### A printer left halfway through an image
+### Cancelling a job
 
-If the connection is cut (or `cancel()` is called) while the plugin is still sending an image, some printers keep waiting for the bytes that never arrive. On a Ribetec this shows as `Downloading...` on its screen, and it stops accepting Bluetooth connections: every `openPort` fails with `notConnected` until the printer is turned off and on. Restarting the phone, turning its Bluetooth off and on, or closing the app does not help, and `resetPrinterAfterFailure` cannot help either, because it needs a connection to send `<ESC>!R`.
+`cancel()` aborts the job in progress without leaving the printer halfway through an image:
 
-The plugin cannot prevent this, only report it. When `openPort` keeps failing after a cut or cancelled print, ask the user to turn the printer off and on. If `cancel()` arrives after the printer already received the whole image, the printer finishes the print and `openPort` works again at once.
+- It returns at once and does not block the main thread; the job ends in the background with `PrinterErrorType.cancelled`.
+- The plugin finishes the `BITMAP` band or the `DOWNLOAD` file it is sending and sends nothing after it (no later band, no later file, no `PRINT`). Then it closes the connection. A cancel between two blocks closes the connection at once.
+- With `PdfPrintStrategy.pageByPage` and `PdfPrintStrategy.unifiedRoll` the plugin sends each image in `BITMAP` bands of at most 200 rows. The printed result is the same as with a single `BITMAP`; the bands only give `cancel()` points where it can stop cleanly.
+- With `PdfPrintStrategy.dramBatch` a cancel waits for the file in progress (`DOWNLOAD`) to end before closing.
+- A cancel that arrives while the page is being rendered or converted stops it at the next page or every 128 rows.
+
+### A stuck printer
+
+A stuck printer is one left waiting for the rest of a cut image or file. On a Ribetec this shows as `Downloading...` on its screen, and it stops accepting Bluetooth connections: every `openPort` fails with `notConnected` until the printer is turned off and on. Restarting the phone, turning its Bluetooth off and on, or closing the app does not help.
+
+`cancel()` no longer causes this, because it lets the block in progress end. It can still happen when the connection is lost in the middle of a block (the printer is switched off, goes out of range or the link drops). In that case the printer has to be turned off and on. `resetPrinterAfterFailure` cannot help: it needs a connection to send `<ESC>!R`, and on the RT-320 PB over Bluetooth that command does not recover a stuck printer (tested).
+
+The plugin cannot prevent a lost connection, only report it. When `openPort` keeps failing after a lost connection during a print, ask the user to turn the printer off and on. If the printer already received the whole block, it finishes the print and `openPort` works again at once. A `writeTimeout` that closes a stuck block reports the same advice in its `message`.
 
 Do the same when a call fails with `PrinterErrorType.printerNotReady`: the printer accepted the connection but did not answer the [probe](#probe-does-the-printer-answer).
 
