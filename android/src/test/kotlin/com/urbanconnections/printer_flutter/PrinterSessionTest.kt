@@ -459,6 +459,57 @@ class PrinterSessionTest {
   }
 
   @Test
+  fun runAtomic_aPdfStyleJobShowsTheRenderOfEveryPageAndWritesOnlyCountAsSend() {
+    var now = 0L
+    val phases = PhaseTimer { now }
+    val session = session(sleeper = { now += it }, closeGraceMs = 0) { now += 4 }
+
+    // Like printPdf: render a page, write it, render the next one, write it.
+    session.runAtomic("AA:BB", 1_000, confirmCompletion = false, limits = limits, phases = phases) { conn ->
+      repeat(2) {
+        val page = phases.measureRender {
+          now += 30
+          "PAGE".toByteArray()
+        }
+        now += 6
+        conn.write(page, 1_000)
+      }
+    }
+
+    assertEquals(60, phases.millis(PrintPhase.RENDER))
+    assertEquals(12, phases.millis(PrintPhase.SEND))
+    assertEquals(
+      "Atomic print phases: connect=4ms render=60ms send=12ms confirm=0ms",
+      phases.formatLine(),
+    )
+  }
+
+  @Test
+  fun runAtomic_aTsplOrRawJobShowsZeroRender() {
+    var now = 0L
+    val phases = PhaseTimer { now }
+    val session = session(sleeper = { now += it }, closeGraceMs = 0)
+
+    // Like sendTspl and sendRawBytes: only a write, nothing is rendered.
+    session.runAtomic("AA:BB", 1_000, confirmCompletion = false, limits = limits, phases = phases) {
+      now += 9
+      it.write("SIZE 72 mm, 40 mm".toByteArray(), 1_000)
+    }
+
+    assertEquals(0, phases.millis(PrintPhase.RENDER))
+    assertEquals(9, phases.millis(PrintPhase.SEND))
+  }
+
+  @Test
+  fun measureRender_withoutATimerOnlyRunsTheBlock() {
+    val timer: PhaseTimer? = null
+
+    val value = timer.measureRender { 42 }
+
+    assertEquals(42, value)
+  }
+
+  @Test
   fun runAtomic_recordsThePhasesReachedWhenItFails() {
     var now = 0L
     val phases = PhaseTimer { now }

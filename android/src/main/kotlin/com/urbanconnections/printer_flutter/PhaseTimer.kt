@@ -61,3 +61,10 @@ class PhaseTimer(private val clock: () -> Long = { System.nanoTime() / NANOS_PER
     const val NANOS_PER_MILLI = 1_000_000L
   }
 }
+
+/**
+ * Times [block] as the render phase of an atomic print call (rasterising a PDF page and turning it
+ * into printer bytes). Without a timer, as in the three-step API, it only runs [block].
+ */
+fun <T> PhaseTimer?.measureRender(block: () -> T): T =
+  if (this == null) block() else measure(PrintPhase.RENDER, block)

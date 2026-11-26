@@ -9,8 +9,8 @@
 
 ## 2. Plugin wiring
 
-- [ ] 2.1 In `PrinterFlutterPlugin.onMethodCall`, make `printPdf`, `sendTspl` and `sendRawBytes` take the atomic path when `macAddress` is present (reading `macAddress`, `pin`, `fallbackPin`, `connectTimeoutMs`, `confirmCompletion`) and the existing path otherwise; keep pairing PIN handling as in `openPort`, run on the job executor, and log the `PhaseTimer` line when the call ends; verify `./gradlew test` in `android/` (or the project's Kotlin test command) passes and describe the manual check of the log line.
-- [ ] 2.2 Measure the render phase inside the `printPdf` job (a `PhaseTimer` passed into the send lambda); verify the line shows a render value for `printPdf` and zero for TSPL/raw in the timer test.
+- [x] 2.1 In `PrinterFlutterPlugin.onMethodCall`, make `printPdf`, `sendTspl` and `sendRawBytes` take the atomic path when `macAddress` is present (reading `macAddress`, `pin`, `fallbackPin`, `connectTimeoutMs`, `confirmCompletion`) and the existing path otherwise; keep pairing PIN handling as in `openPort`, run on the job executor, and log the `PhaseTimer` line when the call ends; verify `./gradlew test` in `android/` (or the project's Kotlin test command) passes and describe the manual check of the log line.
+- [x] 2.2 Measure the render phase inside the `printPdf` job (a `PhaseTimer` passed into the send lambda); verify the line shows a render value for `printPdf` and zero for TSPL/raw in the timer test.
 
 ## 3. Dart API
 

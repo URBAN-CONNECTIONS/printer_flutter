@@ -40,9 +40,10 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
   private val BLUETOOTH_ENABLE_REQUEST_CODE = 1002
 
   // Auto-pairing state
-  private var targetMacAddress: String? = null
-  private var currentPin: String = "0000"
-  private var currentFallbackPin: String? = "1234"
+  // Written on the main thread by openPort and on the job thread by an atomic call; read by the receiver.
+  @Volatile private var targetMacAddress: String? = null
+  @Volatile private var currentPin: String = "0000"
+  @Volatile private var currentFallbackPin: String? = "1234"
   private var receiverRegistered = false
 
   // Single thread executor to run printer jobs off the main thread, one at a time.
@@ -145,22 +146,37 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
       "sendTspl" -> {
         val command = call.argument<String>("command") ?: ""
         val closePort = call.argument<Boolean>("closePort") ?: false
+        val confirmCompletion = call.argument<Boolean>("confirmCompletion") ?: true
         val limits = jobLimitsFrom(call)
-        executeInBackground(result) {
-          session.runJob(closePort, limits) { conn ->
+        val atomicMac = atomicMacAddress(call)
+        if (atomicMac != null) {
+          // The whole job in one call; closePort has no effect because the call always closes.
+          executeAtomic(call, result, atomicMac) { conn, _ ->
             conn.write(command.toByteArray(), limits.writeTimeoutMs)
+          }
+        } else {
+          executeInBackground(result) {
+            session.runJob(closePort, limits, confirmCompletion) { conn ->
+              conn.write(command.toByteArray(), limits.writeTimeoutMs)
+            }
           }
         }
       }
       "sendRawBytes" -> {
         val bytes = call.argument<ByteArray>("bytes")
         val closePort = call.argument<Boolean>("closePort") ?: false
+        val confirmCompletion = call.argument<Boolean>("confirmCompletion") ?: true
         val limits = jobLimitsFrom(call)
-        executeInBackground(result) {
-          if (bytes == null) {
-            "No bytes provided"
-          } else {
-            session.runJob(closePort, limits) { conn -> conn.write(bytes, limits.writeTimeoutMs) }
+        val atomicMac = atomicMacAddress(call)
+        if (atomicMac != null && bytes != null) {
+          executeAtomic(call, result, atomicMac) { conn, _ -> conn.write(bytes, limits.writeTimeoutMs) }
+        } else {
+          executeInBackground(result) {
+            if (bytes == null) {
+              "No bytes provided"
+            } else {
+              session.runJob(closePort, limits, confirmCompletion) { conn -> conn.write(bytes, limits.writeTimeoutMs) }
+            }
           }
         }
       }
@@ -177,16 +193,31 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
         val options = call.argument<Map<String, Any>>("options") ?: emptyMap()
         val copies = call.argument<Int>("copies") ?: 1
         val closePort = call.argument<Boolean>("closePort") ?: false
+        val confirmCompletion = call.argument<Boolean>("confirmCompletion") ?: true
         val limits = jobLimitsFrom(call)
-        executeInBackground(result) {
-          session.runJob(closePort, limits) { conn ->
+        val atomicMac = atomicMacAddress(call)
+        if (atomicMac != null) {
+          executeAtomic(call, result, atomicMac) { conn, phases ->
             PdfPrintHelper.printPdf(
               filePath = filePath,
               options = options,
               copies = copies,
               sendCommand = { bytes -> conn.write(bytes, limits.writeTimeoutMs) },
-              sendString = { str -> conn.write(str.toByteArray(), limits.writeTimeoutMs) }
+              sendString = { str -> conn.write(str.toByteArray(), limits.writeTimeoutMs) },
+              phases = phases
             )
+          }
+        } else {
+          executeInBackground(result) {
+            session.runJob(closePort, limits, confirmCompletion) { conn ->
+              PdfPrintHelper.printPdf(
+                filePath = filePath,
+                options = options,
+                copies = copies,
+                sendCommand = { bytes -> conn.write(bytes, limits.writeTimeoutMs) },
+                sendString = { str -> conn.write(str.toByteArray(), limits.writeTimeoutMs) }
+              )
+            }
           }
         }
       }
@@ -290,6 +321,44 @@ class PrinterFlutterPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Plu
         mainHandler.post {
           result.error("PRINTER_ERROR", e.message ?: e.toString(), null)
         }
+      }
+    }
+  }
+
+  /** The `macAddress` of a print call, or null when the call uses the three-step API. */
+  private fun atomicMacAddress(call: MethodCall): String? =
+    call.argument<String>("macAddress")?.takeIf { it.isNotEmpty() }
+
+  /**
+   * Runs a whole job (connect, send, confirm, close) as one task of the job executor, so atomic
+   * calls run first-in-first-out. The pairing PIN is set when the task starts, not when the call
+   * arrives, so a call waiting in the queue does not change the PIN of the one that is running.
+   * When the call ends, in success or failure, the phase times go to the log in one line that
+   * holds no MAC address and no PIN.
+   */
+  private fun executeAtomic(
+    call: MethodCall,
+    result: Result,
+    macAddress: String,
+    send: (PrinterConnection, PhaseTimer) -> Unit,
+  ) {
+    val connectTimeoutMs = call.longArgument("connectTimeoutMs", PrinterSession.DEFAULT_CONNECT_TIMEOUT_MS)
+    val confirmCompletion = call.argument<Boolean>("confirmCompletion") ?: true
+    val pin = call.argument<String>("pin") ?: "0000"
+    val fallbackPin = call.argument<String>("fallbackPin")
+    val limits = jobLimitsFrom(call)
+    val phases = PhaseTimer()
+
+    executeInBackground(result) {
+      targetMacAddress = macAddress.uppercase()
+      currentPin = pin
+      currentFallbackPin = fallbackPin
+      try {
+        session.runAtomic(macAddress, connectTimeoutMs, confirmCompletion, limits, phases) { conn ->
+          send(conn, phases)
+        }
+      } finally {
+        Log.i("PrinterFlutterPlugin", phases.formatLine())
       }
     }
   }
